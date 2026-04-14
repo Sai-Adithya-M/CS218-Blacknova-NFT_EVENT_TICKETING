@@ -10,7 +10,7 @@ import contractABI from './contracts/NFTTicket.json';
 // CONFIGURATION
 // ============================
 // TODO: Replace with your deployed contract address
-const CONTRACT_ADDRESS = '0x5c8240dab6D9CE54935af13128df2C6DE598eB50';
+const CONTRACT_ADDRESS = '0x74eFFE12e70e99e4CC9D2703433eFcF87A35BdE3';
 
 // Supported chain IDs
 const SUPPORTED_CHAINS = {
@@ -110,6 +110,12 @@ async function loadTabData(tab) {
       case 'marketplace':
         await refreshMarketplace();
         break;
+      case 'dashboard':
+        await refreshDashboard();
+        break;
+      case 'create':
+        // No async data to load for the create form
+        break;
     }
   } catch (err) {
     console.error(`Error loading ${tab}:`, err);
@@ -124,6 +130,14 @@ async function refreshEvents() {
   container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading events...</p></div>';
   const events = await loadEvents();
   renderEvents(events, container);
+
+  // Smart design: Show Dashboard tab only if user owns at least one event
+  const account = getCurrentAccount();
+  const hasOwnEvents = account && events.some(evt => evt.organiser.toLowerCase() === account.toLowerCase());
+  const dashboardTab = document.getElementById('tab-dashboard');
+  if (dashboardTab) {
+    dashboardTab.style.display = hasOwnEvents ? 'block' : 'none';
+  }
 }
 
 async function refreshTickets() {
@@ -138,6 +152,17 @@ async function refreshMarketplace() {
   container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading marketplace...</p></div>';
   const listings = await loadResaleListings();
   renderMarketplace(listings, container, refreshMarketplace);
+}
+
+async function refreshDashboard() {
+  const container = document.getElementById('dashboard-container');
+  container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading dashboard...</p></div>';
+  const allEvents = await loadEvents();
+  const account = getCurrentAccount();
+  const myEvents = allEvents.filter(evt => account && evt.organiser.toLowerCase() === account.toLowerCase());
+  
+  // Reuse renderEvents but pass a flag to style them as dashboard cards
+  renderEvents(myEvents, container, true);
 }
 
 // ============================
@@ -246,6 +271,13 @@ function setupCreateEventForm() {
     if (success) {
       form.reset();
       await refreshEvents();
+      // Auto-navigate to dashboard so they can see their new event
+      const dashBtn = document.querySelector('[data-tab="dashboard"]');
+      if (dashBtn && dashBtn.style.display !== 'none') {
+        dashBtn.click();
+      } else {
+        document.querySelector('[data-tab="events"]').click();
+      }
     }
   });
 }
@@ -265,6 +297,7 @@ async function init() {
   document.getElementById('refresh-events-btn').addEventListener('click', refreshEvents);
   document.getElementById('refresh-tickets-btn').addEventListener('click', refreshTickets);
   document.getElementById('refresh-marketplace-btn').addEventListener('click', refreshMarketplace);
+  document.getElementById('refresh-dashboard-btn').addEventListener('click', refreshDashboard);
 
   // Wallet listeners
   setupWalletListeners(

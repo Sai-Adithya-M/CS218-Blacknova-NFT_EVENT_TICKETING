@@ -36,8 +36,11 @@
   <!-- TABS -->
   <nav class="nav-tabs" id="nav-tabs">
     <button class="nav-tab active" data-tab="events">🎪 Events</button>
+    
     <button class="nav-tab" data-tab="tickets">🎫 My Tickets</button>
     <button class="nav-tab" data-tab="marketplace">🛒 Marketplace</button>
+    <button class="nav-tab" data-tab="create">✨ Create Event</button>
+    <button class="nav-tab" data-tab="dashboard" id="tab-dashboard" style="display: none;">📊 Dashboard</button>
   </nav>
 
   <!-- MAIN CONTENT -->
@@ -45,9 +48,23 @@
 
     <!-- EVENTS TAB -->
     <section class="tab-panel active" id="panel-events">
-      <!-- Create Event Form -->
-      <div class="form-card" id="create-event-form-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Upcoming Events</h2>
+          <p class="section-subtitle">Browse events and purchase tickets as NFTs</p>
+        </div>
+        <button class="btn btn-secondary" id="refresh-events-btn" style="width: auto;">↻ Refresh</button>
+      </div>
+      <div class="cards-grid" id="events-container">
+        <!-- Dynamically populated -->
+      </div>
+    </section>
+
+    <!-- CREATE EVENT TAB -->
+    <section class="tab-panel" id="panel-create">
+      <div class="form-card" id="create-event-form-card" style="margin: 0 auto; max-width: 800px;">
         <h3 class="form-title">✨ Create New Event</h3>
+        <p class="section-subtitle" style="margin-bottom: 24px;">Host your own event and sell NFT tickets directly to your audience.</p>
         <form id="create-event-form">
           <div class="form-grid">
             <div class="form-group">
@@ -67,19 +84,8 @@
               <input class="input" type="number" id="event-royalty" placeholder="e.g., 5" step="0.5" min="0" max="100" required />
             </div>
           </div>
-          <button class="btn btn-primary" type="submit" id="create-event-btn">Create Event</button>
+          <button class="btn btn-primary" type="submit" id="create-event-btn" style="margin-top: 16px;">Create Event</button>
         </form>
-      </div>
-
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">Upcoming Events</h2>
-          <p class="section-subtitle">Browse events and purchase tickets as NFTs</p>
-        </div>
-        <button class="btn btn-secondary" id="refresh-events-btn" style="width: auto;">↻ Refresh</button>
-      </div>
-      <div class="cards-grid" id="events-container">
-        <!-- Dynamically populated -->
       </div>
     </section>
 
@@ -107,6 +113,20 @@
         <button class="btn btn-secondary" id="refresh-marketplace-btn" style="width: auto;">↻ Refresh</button>
       </div>
       <div class="cards-grid" id="marketplace-container">
+        <!-- Dynamically populated -->
+      </div>
+    </section>
+
+    <!-- DASHBOARD TAB -->
+    <section class="tab-panel" id="panel-dashboard">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Your Hosted Events</h2>
+          <p class="section-subtitle">Manage the events you have created</p>
+        </div>
+        <button class="btn btn-secondary" id="refresh-dashboard-btn" style="width: auto;">↻ Refresh</button>
+      </div>
+      <div class="cards-grid" id="dashboard-container">
         <!-- Dynamically populated -->
       </div>
     </section>
