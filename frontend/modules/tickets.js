@@ -20,7 +20,7 @@ export async function loadMyTickets() {
       const owner = await contract.ownerOf(i);
       if (owner.toLowerCase() === account.toLowerCase()) {
         const eventId = await contract.tokenToEvent(i);
-        const evt = await contract.getEvent(eventId);
+        const evt = await contract.fetchEventData(eventId);
         const listing = await contract.getResaleListing(i);
 
         tickets.push({
