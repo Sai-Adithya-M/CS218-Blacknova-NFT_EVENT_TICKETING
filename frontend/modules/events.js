@@ -38,7 +38,7 @@ export async function loadEvents() {
 
   for (let i = 1; i < Number(nextEventId); i++) {
     try {
-      const evt = await contract.getEvent(i);
+      const evt = await contract.fetchEventData(i);
       if (evt.exists) {
         events.push({
           id: i,
@@ -135,7 +135,7 @@ export function renderEvents(events, container) {
         </div>
       </div>
       <div class="card-footer">
-        ${!soldOut ? `<button class="btn btn-primary buy-ticket-btn" data-event-id="${evt.id}" data-price="${evt.priceWei}">Buy Ticket — ${priceEth} ETH</button>` : `<button class="btn btn-disabled" disabled>Sold Out</button>`}
+        ${!soldOut ? `<button class="btn btn-primary buy-ticket-btn" data-event-id="${evt.id}" data-price="${evt.priceWei.toString()}">Buy Ticket — ${priceEth} ETH</button>` : `<button class="btn btn-disabled" disabled>Sold Out</button>`}
       </div>
     `;
     container.appendChild(card);
@@ -144,8 +144,8 @@ export function renderEvents(events, container) {
   // Attach buy listeners
   container.querySelectorAll('.buy-ticket-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const eventId = btn.dataset.eventId;
-      const priceWei = btn.dataset.price;
+      const eventId = Number(btn.dataset.eventId); // dataset is always a string; contract expects uint256
+      const priceWei = BigInt(btn.dataset.price);  // ethers v6 requires BigInt for value field
       const success = await buyTicket(eventId, priceWei);
       if (success) {
         // Refresh events
