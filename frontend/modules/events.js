@@ -38,7 +38,7 @@ export async function loadEvents() {
 
   for (let i = 1; i < Number(nextEventId); i++) {
     try {
-      const evt = await contract.getEvent(i);
+      const evt = await contract.fetchEventData(i);
       if (evt.exists) {
         events.push({
           id: i,
@@ -83,7 +83,7 @@ export async function buyTicket(eventId, priceWei) {
 /**
  * Render events list into the given container
  */
-export function renderEvents(events, container) {
+export function renderEvents(events, container, isDashboard = false) {
   container.innerHTML = '';
 
   if (events.length === 0) {
@@ -106,6 +106,38 @@ export function renderEvents(events, container) {
 
     const card = document.createElement('div');
     card.className = 'card event-card';
+    let extraStatsHtml = '';
+    let footerHtml = '';
+
+    if (isDashboard) {
+      // Dashboard view: show generated revenue instead of organiser
+      const revenueEth = (evt.ticketsSold * parseFloat(priceEth)).toFixed(4);
+      extraStatsHtml = `
+        <div class="card-stat organiser-row">
+          <span class="stat-label">Total Revenue</span>
+          <span class="stat-value" style="color: var(--primary); font-weight: bold;">${revenueEth} ETH</span>
+        </div>
+      `;
+      footerHtml = `
+      <div class="card-footer">
+        <div class="btn btn-disabled" style="width: 100%; text-align: center; background: var(--bg-secondary);">⭐ Your Event</div>
+      </div>
+      `;
+    } else {
+      // Public view: show organiser and buy button
+      extraStatsHtml = `
+        <div class="card-stat organiser-row">
+          <span class="stat-label">Organiser</span>
+          <span class="stat-value address-text">${isOrganiser ? 'You' : truncAddr(evt.organiser)}</span>
+        </div>
+      `;
+      footerHtml = `
+      <div class="card-footer">
+        ${!soldOut ? `<button class="btn btn-primary buy-ticket-btn" data-event-id="${evt.id}" data-price="${evt.priceWei.toString()}">Buy Ticket — ${priceEth} ETH</button>` : `<button class="btn btn-disabled" disabled>Sold Out</button>`}
+      </div>
+      `;
+    }
+
     card.innerHTML = `
       <div class="card-header">
         <h3 class="card-title">${escapeHtml(evt.name)}</h3>
@@ -129,14 +161,9 @@ export function renderEvents(events, container) {
         <div class="progress-bar">
           <div class="progress-fill" style="width: ${progress}%"></div>
         </div>
-        <div class="card-stat organiser-row">
-          <span class="stat-label">Organiser</span>
-          <span class="stat-value address-text">${isOrganiser ? 'You' : truncAddr(evt.organiser)}</span>
-        </div>
+        ${extraStatsHtml}
       </div>
-      <div class="card-footer">
-        ${!soldOut ? `<button class="btn btn-primary buy-ticket-btn" data-event-id="${evt.id}" data-price="${evt.priceWei}">Buy Ticket — ${priceEth} ETH</button>` : `<button class="btn btn-disabled" disabled>Sold Out</button>`}
-      </div>
+      ${footerHtml}
     `;
     container.appendChild(card);
   });
@@ -144,8 +171,8 @@ export function renderEvents(events, container) {
   // Attach buy listeners
   container.querySelectorAll('.buy-ticket-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const eventId = btn.dataset.eventId;
-      const priceWei = btn.dataset.price;
+      const eventId = Number(btn.dataset.eventId); // dataset is always a string; contract expects uint256
+      const priceWei = BigInt(btn.dataset.price);  // ethers v6 requires BigInt for value field
       const success = await buyTicket(eventId, priceWei);
       if (success) {
         // Refresh events
