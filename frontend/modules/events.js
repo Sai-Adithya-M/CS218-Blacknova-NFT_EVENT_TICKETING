@@ -164,6 +164,9 @@ export function renderEvents(events, container, isDashboard = false) {
         ${extraStatsHtml}
       </div>
       ${footerHtml}
+
+      </div>
+      ${footerHtml}
     `;
     container.appendChild(card);
   });
