@@ -126,7 +126,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- View & Standards ---
-    function getEvent(uint eventId) public view returns (Event memory) {
+    function fetchEventData(uint eventId) public view returns (Event memory) {
         return events[eventId];
     }
 
