@@ -158,6 +158,7 @@ async function refreshTickets() {
 
 async function refreshMarketplace() {
   const container = document.getElementById('marketplace-container');
+  container.className = 'cards-grid';
   container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading marketplace...</p></div>';
   const listings = await loadResaleListings();
   renderMarketplace(listings, container, refreshMarketplace);
