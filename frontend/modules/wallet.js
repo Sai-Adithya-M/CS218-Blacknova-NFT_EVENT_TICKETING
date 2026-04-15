@@ -4,6 +4,8 @@ import { ethers } from 'ethers';
 let provider = null;
 let signer = null;
 let currentAccount = null;
+let isRequestPending = false; // Track pending requests
+let pendingRequest = null;    // Cache the in-flight promise
 
 /**
  * Connect to MetaMask and return the signer
@@ -13,12 +15,48 @@ export async function connectWallet() {
     throw new Error('MetaMask is not installed. Please install MetaMask to use this app.');
   }
 
-  provider = new ethers.BrowserProvider(window.ethereum);
-  const accounts = await provider.send('eth_requestAccounts', []);
-  currentAccount = accounts[0];
-  signer = await provider.getSigner();
+  // If a request is already pending, return the same promise
+  if (isRequestPending && pendingRequest) {
+    return pendingRequest;
+  }
 
-  return { provider, signer, account: currentAccount };
+  isRequestPending = true;
+  pendingRequest = (async () => {
+    try {
+      provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // Force MetaMask to allow the user to select accounts
+      await window.ethereum.request({
+        method: 'wallet_requestPermissions',
+        params: [{ eth_accounts: {} }],
+      });
+      
+      const accounts = await provider.send('eth_requestAccounts', []);
+      currentAccount = accounts[0];
+      signer = await provider.getSigner();
+
+      return { provider, signer, account: currentAccount };
+    } catch (err) {
+      if (err.code === -32002) {
+        throw new Error("Please check your MetaMask extension. A connection request is already waiting for your approval.");
+      }
+      throw err;
+    } finally {
+      isRequestPending = false;
+      pendingRequest = null;
+    }
+  })();
+
+  return pendingRequest;
+}
+
+/**
+ * Disconnect wallet session (client-side only)
+ */
+export function disconnectWallet() {
+  currentAccount = null;
+  signer = null;
+  // We keep provider so read operations can still work
 }
 
 /**

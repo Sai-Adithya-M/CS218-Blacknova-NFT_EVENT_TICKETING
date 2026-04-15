@@ -17,7 +17,7 @@ export async function loadResaleListings() {
       const listing = await contract.getResaleListing(i);
       if (listing.active) {
         const eventId = await contract.tokenToEvent(i);
-        const evt = await contract.getEvent(eventId);
+        const evt = await contract.fetchEventData(eventId);
         listings.push({
           tokenId: i,
           seller: listing.seller,
@@ -87,7 +87,6 @@ export function renderMarketplace(listings, container, onRefresh) {
   if (listings.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <span class="empty-icon">🛒</span>
         <p>No tickets listed for resale</p>
         <p class="empty-sub">Check back later or list your own!</p>
       </div>

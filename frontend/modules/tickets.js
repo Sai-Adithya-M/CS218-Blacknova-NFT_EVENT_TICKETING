@@ -71,7 +71,6 @@ export function renderMyTickets(tickets, container, onRefresh) {
   if (tickets.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <span class="empty-icon">🎫</span>
         <p>You don't own any tickets yet</p>
         <p class="empty-sub">Head to Events to purchase one!</p>
       </div>
@@ -86,7 +85,7 @@ export function renderMyTickets(tickets, container, onRefresh) {
       <div class="card-header">
         <h3 class="card-title">${escapeHtml(ticket.eventName)}</h3>
         <span class="card-badge ${ticket.isListed ? 'badge-listed' : 'badge-owned'}">
-          ${ticket.isListed ? '📢 LISTED' : '✅ OWNED'}
+          ${ticket.isListed ? 'LISTED' : 'OWNED'}
         </span>
       </div>
       <div class="card-body">

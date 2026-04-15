@@ -1,6 +1,6 @@
 // main.js — App entry point
 import { ethers } from 'ethers';
-import { connectWallet, silentConnect, switchToSepolia, getCurrentAccount, truncateAddress, setupWalletListeners, getProvider, getSigner } from './modules/wallet.js';
+import { connectWallet, disconnectWallet, silentConnect, switchToSepolia, getCurrentAccount, truncateAddress, setupWalletListeners, getProvider, getSigner } from './modules/wallet.js';
 import { createEvent, loadEvents, renderEvents } from './modules/events.js';
 import { loadMyTickets, renderMyTickets } from './modules/tickets.js';
 import { loadResaleListings, renderMarketplace } from './modules/marketplace.js';
@@ -73,6 +73,13 @@ export function hideLoading() {
 // ============================
 // TAB NAVIGATION
 // ============================
+const loadedTabs = {
+  events: false,
+  tickets: false,
+  marketplace: false,
+  dashboard: false
+};
+
 function setupTabs() {
   const tabs = document.querySelectorAll('.nav-tab');
   const panels = document.querySelectorAll('.tab-panel');
@@ -102,16 +109,16 @@ async function loadTabData(tab) {
   try {
     switch (tab) {
       case 'events':
-        await refreshEvents();
+        if (!loadedTabs.events) await refreshEvents();
         break;
       case 'tickets':
-        await refreshTickets();
+        if (!loadedTabs.tickets) await refreshTickets();
         break;
       case 'marketplace':
-        await refreshMarketplace();
+        if (!loadedTabs.marketplace) await refreshMarketplace();
         break;
       case 'dashboard':
-        await refreshDashboard();
+        if (!loadedTabs.dashboard) await refreshDashboard();
         break;
       case 'create':
         // No async data to load for the create form
@@ -130,6 +137,7 @@ async function refreshEvents() {
   container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading events...</p></div>';
   const events = await loadEvents();
   renderEvents(events, container);
+  loadedTabs.events = true;
 
   // Smart design: Show Dashboard tab only if user owns at least one event
   const account = getCurrentAccount();
@@ -145,6 +153,7 @@ async function refreshTickets() {
   container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading tickets...</p></div>';
   const tickets = await loadMyTickets();
   renderMyTickets(tickets, container, refreshTickets);
+  loadedTabs.tickets = true;
 }
 
 async function refreshMarketplace() {
@@ -152,6 +161,7 @@ async function refreshMarketplace() {
   container.innerHTML = '<div class="empty-state"><div class="spinner" style="margin: 0 auto;"></div><p style="margin-top:16px;">Loading marketplace...</p></div>';
   const listings = await loadResaleListings();
   renderMarketplace(listings, container, refreshMarketplace);
+  loadedTabs.marketplace = true;
 }
 
 async function refreshDashboard() {
@@ -163,44 +173,51 @@ async function refreshDashboard() {
   
   // Reuse renderEvents but pass a flag to style them as dashboard cards
   renderEvents(myEvents, container, true);
+  loadedTabs.dashboard = true;
 }
 
 // ============================
 // WALLET CONNECTION
 // ============================
 function updateWalletUI(account) {
-  const btn = document.getElementById('connect-wallet-btn');
-  const btnText = document.getElementById('wallet-btn-text');
+  const loginBtn = document.getElementById('connect-wallet-btn');
+  const addressDisplay = document.getElementById('wallet-address-display');
+  const addressText = document.getElementById('wallet-address-text');
+  const logoutBtn = document.getElementById('logout-btn');
   const networkBadge = document.getElementById('network-badge');
   const connectPrompt = document.getElementById('connect-prompt');
   const mainPanels = document.querySelectorAll('.tab-panel');
 
   if (account) {
-    btn.classList.add('connected');
-    btnText.textContent = truncateAddress(account);
+    loginBtn.style.display = 'none';
+    addressDisplay.style.display = 'flex';
+    addressText.textContent = truncateAddress(account);
+    logoutBtn.style.display = 'flex';
     networkBadge.style.display = 'flex';
     connectPrompt.style.display = 'none';
 
-    // Ensure active tab panel is visible
-    const activeTab = document.querySelector('.nav-tab.active');
-    if (activeTab) {
-      const panel = document.getElementById(`panel-${activeTab.dataset.tab}`);
-      if (panel) panel.style.display = '';
-    }
+    // Remove inline 'display: none' from ALL panels so CSS classes control visibility again
+    mainPanels.forEach((p) => (p.style.display = ''));
 
     // Reset contract instances so they use updated provider
     readContract = null;
     writeContract = null;
 
     // Load initial data
-    loadTabData('events');
+    const activeTab = document.querySelector('.nav-tab.active');
+    if (activeTab) {
+      loadTabData(activeTab.dataset.tab);
+    } else {
+      loadTabData('events');
+    }
   } else {
-    btn.classList.remove('connected');
-    btnText.textContent = 'Connect Wallet';
+    loginBtn.style.display = 'flex';
+    addressDisplay.style.display = 'none';
+    logoutBtn.style.display = 'none';
     networkBadge.style.display = 'none';
 
     // Show connect prompt
-    document.querySelectorAll('.tab-panel').forEach((p) => (p.style.display = 'none'));
+    mainPanels.forEach((p) => (p.style.display = 'none'));
     connectPrompt.style.display = '';
   }
 }
@@ -215,7 +232,7 @@ async function updateNetworkInfo() {
       document.getElementById('network-name').textContent = networkName;
 
       // Auto-switch to Sepolia if on wrong network
-      if (chainId !== 11155111 && chainId !== 31337) {
+      if (chainId !== 11155111) {
         showToast('Switching to Sepolia network...', 'info');
         try {
           await switchToSepolia();
@@ -240,12 +257,27 @@ async function handleConnect() {
     const { account } = await connectWallet();
     updateWalletUI(account);
     await updateNetworkInfo();
-    showToast('Wallet connected!', 'success');
+    showToast('Login successful!', 'success');
   } catch (err) {
     console.error('Connection error:', err);
-    showToast(err.reason || err.message || 'Failed to connect wallet', 'error');
+    showToast(err.reason || err.message || 'Failed to login', 'error');
   } finally {
     isConnecting = false;
+  }
+}
+
+function handleLogout() {
+  if (getCurrentAccount()) {
+    disconnectWallet();
+    
+    // Clear cache upon manual logout
+    loadedTabs.events = false;
+    loadedTabs.tickets = false;
+    loadedTabs.marketplace = false;
+    loadedTabs.dashboard = false;
+    
+    updateWalletUI(null);
+    showToast('Logged out successfully', 'info');
   }
 }
 
@@ -292,6 +324,7 @@ async function init() {
   // Wallet connection buttons
   document.getElementById('connect-wallet-btn').addEventListener('click', handleConnect);
   document.getElementById('connect-prompt-btn').addEventListener('click', handleConnect);
+  document.getElementById('logout-btn').addEventListener('click', handleLogout);
 
   // Refresh buttons
   document.getElementById('refresh-events-btn').addEventListener('click', refreshEvents);
@@ -302,6 +335,12 @@ async function init() {
   // Wallet listeners
   setupWalletListeners(
     (account) => {
+      // Clear cache on wallet change
+      loadedTabs.events = false;
+      loadedTabs.tickets = false;
+      loadedTabs.marketplace = false;
+      loadedTabs.dashboard = false;
+      
       updateWalletUI(account);
       if (account) updateNetworkInfo();
     },
