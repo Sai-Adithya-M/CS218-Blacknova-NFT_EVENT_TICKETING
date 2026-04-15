@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NETIX — NFT Event Ticketing</title>
+<title>NFTICKS — NFT Event Ticketing</title>
   <meta name="description" content="Decentralized NFT event ticketing platform. Create events, buy tickets as NFTs, and trade them on the marketplace with built-in royalties." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./style.css" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎫</text></svg>" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>T</text></svg>" />
 </head>
 <body>
 
@@ -17,17 +17,21 @@
   <header class="header">
     <div class="header-inner">
       <a href="#" class="logo">
-        <span class="logo-icon">🎫</span>
-        <span class="logo-text">NETIX</span>
+        <span class="logo-text">NFTICKS</span>
       </a>
       <div class="header-right">
         <div class="network-badge" id="network-badge" style="display: none;">
           <span class="network-dot"></span>
           <span id="network-name">Sepolia</span>
         </div>
+        <div class="wallet-btn" id="wallet-address-display" style="display: none; cursor: default; background: rgba(255,255,255,0.05);">
+          <span id="wallet-address-text"></span>
+        </div>
         <button class="wallet-btn" id="connect-wallet-btn">
-          <span>🦊</span>
-          <span id="wallet-btn-text">Connect Wallet</span>
+          <span id="wallet-btn-text">Login / Sign In</span>
+        </button>
+        <button class="wallet-btn" id="logout-btn" style="display: none; background: rgba(234,67,53,0.1); color: #ea4335; border: 1px solid rgba(234,67,53,0.3);">
+          Log Out
         </button>
       </div>
     </div>
@@ -35,12 +39,11 @@
 
   <!-- TABS -->
   <nav class="nav-tabs" id="nav-tabs">
-    <button class="nav-tab active" data-tab="events">🎪 Events</button>
-    
-    <button class="nav-tab" data-tab="tickets">🎫 My Tickets</button>
-    <button class="nav-tab" data-tab="marketplace">🛒 Marketplace</button>
-    <button class="nav-tab" data-tab="create">✨ Create Event</button>
-    <button class="nav-tab" data-tab="dashboard" id="tab-dashboard" style="display: none;">📊 Dashboard</button>
+    <button class="nav-tab active" data-tab="events">Events</button>
+    <button class="nav-tab" data-tab="tickets">My Tickets</button>
+    <button class="nav-tab" data-tab="marketplace">Marketplace</button>
+    <button class="nav-tab" data-tab="create">Create Event</button>
+    <button class="nav-tab" data-tab="dashboard" id="tab-dashboard" style="display: none;">Dashboard</button>
   </nav>
 
   <!-- MAIN CONTENT -->
@@ -63,7 +66,7 @@
     <!-- CREATE EVENT TAB -->
     <section class="tab-panel" id="panel-create">
       <div class="form-card" id="create-event-form-card" style="margin: 0 auto; max-width: 800px;">
-        <h3 class="form-title">✨ Create New Event</h3>
+        <h3 class="form-title">Create New Event</h3>
         <p class="section-subtitle" style="margin-bottom: 24px;">Host your own event and sell NFT tickets directly to your audience.</p>
         <form id="create-event-form">
           <div class="form-grid">
@@ -133,10 +136,9 @@
 
     <!-- CONNECT PROMPT (shown when wallet not connected) -->
     <div class="connect-prompt" id="connect-prompt" style="display: none;">
-      <span class="connect-prompt-icon">🦊</span>
-      <h2>Connect Your Wallet</h2>
-      <p>Connect your MetaMask wallet to interact with the platform</p>
-      <button class="btn btn-primary" id="connect-prompt-btn" style="width: auto; margin: 0 auto;">Connect MetaMask</button>
+      <h2>Login / Sign In</h2>
+      <p>Connect your MetaMask wallet to log into the platform</p>
+      <button class="btn btn-primary" id="connect-prompt-btn" style="width: auto; margin: 0 auto;">Login / Sign In</button>
     </div>
   </main>
 

@@ -89,7 +89,6 @@ export function renderEvents(events, container, isDashboard = false) {
   if (events.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <span class="empty-icon">🎪</span>
         <p>No events created yet</p>
         <p class="empty-sub">Be the first to create an event!</p>
       </div>
@@ -162,9 +161,6 @@ export function renderEvents(events, container, isDashboard = false) {
           <div class="progress-fill" style="width: ${progress}%"></div>
         </div>
         ${extraStatsHtml}
-      </div>
-      ${footerHtml}
-
       </div>
       ${footerHtml}
     `;
