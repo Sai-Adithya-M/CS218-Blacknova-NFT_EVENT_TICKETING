@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Ticket, CalendarDays, Wallet, PlusCircle, LogOut } from 'lucide-react';
-import { useAuthStore } from '../store/useAuthStore';
+import { useAuthStore } from '../../store/useAuthStore';
 
 export const Sidebar: React.FC = () => {
   const location = useLocation();

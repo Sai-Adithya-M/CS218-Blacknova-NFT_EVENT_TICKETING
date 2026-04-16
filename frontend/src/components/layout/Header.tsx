@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAuthStore } from '../store/useAuthStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { Wallet } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -7,8 +7,8 @@ export const Header: React.FC = () => {
   
   if (!user) return null;
   
-  // Format balance to $XX.XX
-  const formattedBalance = `$${user.walletBalance.toFixed(2)}`;
+  // Format balance to ETH
+  const formattedBalance = `${user.walletBalance.toFixed(4)} ETH`;
 
   return (
     <header className="top-header">

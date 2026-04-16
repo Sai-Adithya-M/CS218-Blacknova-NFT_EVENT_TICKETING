@@ -1,5 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   /* Dark Theme Default due to "BlackNova" vibe */
   --bg-main: #0B0A0F;
@@ -64,6 +68,10 @@ input, select {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-light);
+}
+
+.glass-panel {
+  @apply bg-white/5 backdrop-blur-xl border border-white/10;
 }
 
 /* Typography utilities */

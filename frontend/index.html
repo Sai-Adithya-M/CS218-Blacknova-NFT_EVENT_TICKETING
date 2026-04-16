@@ -1,156 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>NFTICKS — NFT Event Ticketing</title>
-  <meta name="description" content="Decentralized NFT event ticketing platform. Create events, buy tickets as NFTs, and trade them on the marketplace with built-in royalties." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./style.css" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>T</text></svg>" />
-</head>
-<body>
-
-  <!-- HEADER -->
-  <header class="header">
-    <div class="header-inner">
-      <a href="#" class="logo">
-        <span class="logo-text">NFTICKS</span>
-      </a>
-      <div class="header-right">
-        <div class="network-badge" id="network-badge" style="display: none;">
-          <span class="network-dot"></span>
-          <span id="network-name">Sepolia</span>
-        </div>
-        <div class="wallet-btn" id="wallet-address-display" style="display: none; cursor: default; background: rgba(255,255,255,0.05);">
-          <span id="wallet-address-text"></span>
-        </div>
-        <button class="wallet-btn" id="connect-wallet-btn">
-          <span id="wallet-btn-text">Login / Sign In</span>
-        </button>
-        <button class="wallet-btn" id="logout-btn" style="display: none; background: rgba(234,67,53,0.1); color: #ea4335; border: 1px solid rgba(234,67,53,0.3);">
-          Log Out
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <!-- TABS -->
-  <nav class="nav-tabs" id="nav-tabs">
-    <button class="nav-tab active" data-tab="events">Events</button>
-    <button class="nav-tab" data-tab="tickets">My Tickets</button>
-    <button class="nav-tab" data-tab="marketplace">Marketplace</button>
-    <button class="nav-tab" data-tab="create">Create Event</button>
-    <button class="nav-tab" data-tab="dashboard" id="tab-dashboard" style="display: none;">Dashboard</button>
-  </nav>
-
-  <!-- MAIN CONTENT -->
-  <main class="main-content">
-
-    <!-- EVENTS TAB -->
-    <section class="tab-panel active" id="panel-events">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">Upcoming Events</h2>
-          <p class="section-subtitle">Browse events and purchase tickets as NFTs</p>
-        </div>
-        <button class="btn btn-secondary" id="refresh-events-btn" style="width: auto;">↻ Refresh</button>
-      </div>
-      <div class="cards-grid" id="events-container">
-        <!-- Dynamically populated -->
-      </div>
-    </section>
-
-    <!-- CREATE EVENT TAB -->
-    <section class="tab-panel" id="panel-create">
-      <div class="form-card" id="create-event-form-card" style="margin: 0 auto; max-width: 800px;">
-        <h3 class="form-title">Create New Event</h3>
-        <p class="section-subtitle" style="margin-bottom: 24px;">Host your own event and sell NFT tickets directly to your audience.</p>
-        <form id="create-event-form">
-          <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label" for="event-name">Event Name</label>
-              <input class="input" type="text" id="event-name" placeholder="e.g., Summer Music Festival" required />
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="event-max-tickets">Max Tickets</label>
-              <input class="input" type="number" id="event-max-tickets" placeholder="e.g., 1000" min="1" required />
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="event-price">Price (ETH)</label>
-              <input class="input" type="number" id="event-price" placeholder="e.g., 0.05" step="0.001" min="0" required />
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="event-royalty">Royalty (%)</label>
-              <input class="input" type="number" id="event-royalty" placeholder="e.g., 5" step="0.5" min="0" max="100" required />
-            </div>
-          </div>
-          <button class="btn btn-primary" type="submit" id="create-event-btn" style="margin-top: 16px;">Create Event</button>
-        </form>
-      </div>
-    </section>
-
-    <!-- MY TICKETS TAB -->
-    <section class="tab-panel" id="panel-tickets">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">My Tickets</h2>
-          <p class="section-subtitle">View your NFT tickets and list them for resale</p>
-        </div>
-        <button class="btn btn-secondary" id="refresh-tickets-btn" style="width: auto;">↻ Refresh</button>
-      </div>
-      <div class="cards-grid" id="tickets-container">
-        <!-- Dynamically populated -->
-      </div>
-    </section>
-
-    <!-- MARKETPLACE TAB -->
-    <section class="tab-panel" id="panel-marketplace">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">Marketplace</h2>
-          <p class="section-subtitle">Browse and buy resale tickets with automatic royalty payouts</p>
-        </div>
-        <button class="btn btn-secondary" id="refresh-marketplace-btn" style="width: auto;">↻ Refresh</button>
-      </div>
-      <div class="cards-grid" id="marketplace-container">
-        <!-- Dynamically populated -->
-      </div>
-    </section>
-
-    <!-- DASHBOARD TAB -->
-    <section class="tab-panel" id="panel-dashboard">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">Your Hosted Events</h2>
-          <p class="section-subtitle">Manage the events you have created</p>
-        </div>
-        <button class="btn btn-secondary" id="refresh-dashboard-btn" style="width: auto;">↻ Refresh</button>
-      </div>
-      <div class="cards-grid" id="dashboard-container">
-        <!-- Dynamically populated -->
-      </div>
-    </section>
-
-    <!-- CONNECT PROMPT (shown when wallet not connected) -->
-    <div class="connect-prompt" id="connect-prompt" style="display: none;">
-      <h2>Login / Sign In</h2>
-      <p>Connect your MetaMask wallet to log into the platform</p>
-      <button class="btn btn-primary" id="connect-prompt-btn" style="width: auto; margin: 0 auto;">Login / Sign In</button>
-    </div>
-  </main>
-
-  <!-- TOAST CONTAINER -->
-  <div class="toast-container" id="toast-container"></div>
-
-  <!-- LOADING OVERLAY -->
-  <div class="loading-overlay" id="loading-overlay">
-    <div class="spinner"></div>
-    <span class="loading-text" id="loading-text">Processing transaction...</span>
-  </div>
-
-  <script type="module" src="./main.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎫</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nifting — NFT Ticketing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

@@ -1,133 +1,200 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useEventStore } from '../store/useEventStore';
 import { useTicketStore } from '../store/useTicketStore';
-import { Ticket, CalendarDays, TrendingUp, Wallet } from 'lucide-react';
+import { Ticket, CalendarDays, TrendingUp, Wallet, ArrowUpRight, ArrowDownRight, Activity, Zap } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { AuthFallback } from '../components/ui/AuthFallback';
+
+const AnimatedCounter = ({ value, prefix = '', suffix = '' }: { value: number | string, prefix?: string, suffix?: string }) => {
+  const [displayValue, setDisplayValue] = useState(0);
+  const targetValue = typeof value === 'string' ? parseFloat(value.replace(/[^0-9.]/g, '')) : value;
+
+  useEffect(() => {
+    const duration = 1500;
+    const startTime = performance.now();
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const current = Math.floor(progress * targetValue);
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setDisplayValue(targetValue);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [targetValue]);
+
+  return <span>{prefix}{displayValue.toLocaleString()}{suffix}</span>;
+};
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuthStore();
   const { events } = useEventStore();
   const { tickets } = useTicketStore();
 
-  if (!user) return null;
+  if (!user) return <AuthFallback />;
 
-  // Derived stats based on role
   const userTickets = tickets.filter(t => t.ownerId === user.id);
-  const activeTickets = userTickets.filter(t => t.status === 'active' || t.status === 'resale');
-  
   const userEvents = events.filter(e => e.organizerId === user.id);
-  const activeEvents = userEvents.filter(e => e.status === 'active');
-  const pastEvents = userEvents.filter(e => e.status === 'past');
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      transition: { duration: 0.5, ease: [0.23, 1, 0.32, 1] }
+    }
+  };
 
   return (
-    <div>
-      <div className="page-header">
+    <motion.div 
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+      className="max-w-7xl mx-auto px-6 py-12"
+    >
+      <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
-          <h1 style={{ fontSize: '2rem', margin: 0 }}>Dashboard</h1>
-          <p className="text-muted">Welcome back, {user.name}</p>
+          <h1 className="text-4xl font-black tracking-tight mb-2">Portfolio Overview</h1>
+          <p className="text-[var(--text-secondary)]">Welcome back, <span className="text-white font-bold">{user.name}</span>. Your assets are performing well.</p>
         </div>
-      </div>
-
-      <div className="dashboard-grid">
-        <div className="stat-card glass">
-          <Wallet className="stat-icon" size={24} />
-          <div className="stat-value">${user.walletBalance.toFixed(2)}</div>
-          <div className="stat-label">Available Balance</div>
+        <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/5 border border-[var(--border-glass)]">
+          <div className="w-2 h-2 rounded-full bg-[var(--status-success)] animate-pulse" />
+          <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Network: Ethereum Mainnet</span>
         </div>
+      </motion.div>
 
-        {user.role === 'buyer' && (
-          <>
-            <div className="stat-card glass">
-              <Ticket className="stat-icon" size={24} />
-              <div className="stat-value">{activeTickets.length}</div>
-              <div className="stat-label">Active Tickets</div>
+      {/* Primary Stats */}
+      <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+        {[
+          { label: 'Total Balance', value: user.walletBalance, icon: Wallet, color: 'text-[var(--accent-teal)]', trend: '+12.5%', isUp: true, suffix: ' ETH' },
+          { label: 'Active Assets', value: user.role === 'buyer' ? userTickets.length : userEvents.length, icon: Ticket, color: 'text-[var(--accent-purple)]', trend: '+2', isUp: true },
+          { label: 'Market Volume', value: 48.2, icon: TrendingUp, color: 'text-white', trend: '-2.4%', isUp: false, suffix: ' ETH' },
+          { label: 'Network Speed', value: 12, icon: Zap, iconColor: 'text-yellow-400', trend: 'Optimal', isUp: true, suffix: 'ms' }
+        ].map((stat, i) => (
+          <motion.div 
+            key={i} 
+            variants={itemVariants}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+            className="glass-panel p-8 rounded-[2rem] border border-[var(--border-glass)] relative overflow-hidden group hover:border-[var(--accent-purple)]/30 transition-all shadow-xl hover:shadow-[var(--accent-purple)]/5"
+          >
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center`}>
+                  <stat.icon size={24} className={stat.iconColor || stat.color} />
+                </div>
+                <div className={`flex items-center gap-1 text-xs font-bold ${stat.isUp ? 'text-[var(--status-success)]' : 'text-red-400'}`}>
+                  {stat.isUp ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                  {stat.trend}
+                </div>
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)] mb-1">{stat.label}</p>
+              <div className={`text-3xl font-black ${stat.color}`}>
+                <AnimatedCounter value={stat.value} suffix={stat.suffix} />
+              </div>
             </div>
-            <div className="stat-card glass">
-              <TrendingUp className="stat-icon" size={24} />
-              <div className="stat-value">{userTickets.filter(t => t.status === 'resale').length}</div>
-              <div className="stat-label">Tickets on Resale</div>
-            </div>
-          </>
-        )}
+            <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-white/[0.02] rounded-full blur-2xl group-hover:bg-[var(--accent-purple)]/5 transition-all" />
+          </motion.div>
+        ))}
+      </motion.div>
 
-        {user.role === 'organizer' && (
-          <>
-            <div className="stat-card glass">
-              <CalendarDays className="stat-icon" size={24} />
-              <div className="stat-value">{activeEvents.length}</div>
-              <div className="stat-label">Active Events</div>
+      <div className="grid lg:grid-cols-3 gap-8">
+        {/* Activity Chart Placeholder */}
+        <motion.div variants={itemVariants} className="lg:col-span-2 space-y-8">
+          <div className="glass-panel p-10 rounded-[2.5rem] border border-[var(--border-glass)] h-full min-h-[400px]">
+            <div className="flex items-center justify-between mb-10">
+              <h2 className="text-xl font-bold flex items-center gap-3">
+                <Activity className="text-[var(--accent-purple)]" />
+                Performance Analytics
+              </h2>
+              <div className="flex gap-2">
+                {['1D', '1W', '1M', 'ALL'].map(t => (
+                  <button key={t} className={`px-4 py-2 rounded-xl text-[10px] font-black ${t === '1W' ? 'bg-[var(--accent-purple)]' : 'hover:bg-white/5 text-[var(--text-secondary)]'} transition-all`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="stat-card glass">
-              <TrendingUp className="stat-icon" size={24} />
-              <div className="stat-value">{pastEvents.length}</div>
-              <div className="stat-label">Past Events</div>
+            
+            <div className="flex items-end justify-between h-48 gap-2 px-4">
+              {[40, 70, 45, 90, 65, 80, 50, 85, 60, 95, 75, 100].map((h, i) => (
+                <div key={i} className="flex-1 group relative">
+                  <motion.div 
+                    initial={{ height: 0 }}
+                    animate={{ height: `${h}%` }}
+                    transition={{ duration: 1, delay: 0.5 + i * 0.05, ease: "easeOut" }}
+                    className={`w-full rounded-t-lg bg-gradient-to-t ${i % 2 === 0 ? 'from-[var(--accent-purple)]/20 to-[var(--accent-purple)]' : 'from-[var(--accent-teal)]/20 to-[var(--accent-teal)]'} opacity-40 group-hover:opacity-100 transition-all cursor-pointer`} 
+                  />
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-black text-[10px] font-black px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                    {h} ETH
+                  </div>
+                </div>
+              ))}
             </div>
-          </>
-        )}
-      </div>
+            <div className="flex justify-between mt-6 px-4 text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)]">
+              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+            </div>
+          </div>
+        </motion.div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2rem' }}>
-        <div className="glass" style={{ padding: '2rem', borderRadius: '12px' }}>
-          <h2 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>Recent Activity</h2>
-          {user.role === 'buyer' ? (
-            userTickets.length > 0 ? (
-              <div className="ticket-list">
-                {userTickets.slice(0, 3).map(ticket => {
-                  const event = events.find(e => e.id === ticket.eventId);
-                  if (!event) return null;
-                  const date = new Date(event.date);
+        {/* Recent Activity List */}
+        <motion.div variants={itemVariants} className="space-y-8">
+          <div className="glass-panel p-8 rounded-[2.5rem] border border-[var(--border-glass)]">
+            <h2 className="text-xl font-bold mb-8">Recent Operations</h2>
+            <div className="space-y-6">
+              <AnimatePresence>
+                {(user.role === 'buyer' ? userTickets : userEvents).slice(0, 4).map((item) => {
+                  const date = new Date(item.date);
                   return (
-                    <div key={ticket.id} className="ticket-item glass" style={{ background: 'rgba(0,0,0,0.2)' }}>
-                      <div className="ticket-info">
-                        <div className="ticket-date-block">
-                          <div className="ticket-date-month">{date.toLocaleString('default', { month: 'short' })}</div>
-                          <div className="ticket-date-day">{date.getDate()}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{event.title}</div>
-                          <div className="text-muted" style={{ fontSize: '0.85rem' }}>Ticket ID: {ticket.id}</div>
-                        </div>
+                    <motion.div 
+                      key={item.id} 
+                      variants={itemVariants}
+                      className="flex items-center gap-4 group"
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-white/5 border border-[var(--border-glass)] flex items-center justify-center group-hover:border-[var(--accent-purple)]/50 transition-colors">
+                        <CalendarDays size={20} className="text-[var(--text-secondary)] group-hover:text-[var(--accent-purple)]" />
                       </div>
-                      <div className={`ticket-status status-${ticket.status}`}>
-                        {ticket.status}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-sm truncate uppercase tracking-tight">{item.title}</p>
+                        <p className="text-[10px] text-[var(--text-secondary)] font-black uppercase tracking-widest">{date.toLocaleDateString()}</p>
                       </div>
-                    </div>
+                      <div className="text-right">
+                        <div className="text-xs font-black text-[var(--accent-teal)]">SUCCESS</div>
+                        <div className="text-[9px] text-[var(--text-secondary)] font-mono">0x...{item.id.slice(-4).toUpperCase()}</div>
+                      </div>
+                    </motion.div>
                   );
                 })}
-              </div>
-            ) : (
-              <p className="text-muted">No tickets found. Time to browse some events!</p>
-            )
-          ) : (
-            userEvents.length > 0 ? (
-                 <div className="ticket-list">
-                 {userEvents.slice(0, 3).map(event => {
-                   const date = new Date(event.date);
-                   return (
-                     <div key={event.id} className="ticket-item glass" style={{ background: 'rgba(0,0,0,0.2)' }}>
-                       <div className="ticket-info">
-                         <div className="ticket-date-block">
-                           <div className="ticket-date-month">{date.toLocaleString('default', { month: 'short' })}</div>
-                           <div className="ticket-date-day">{date.getDate()}</div>
-                         </div>
-                         <div>
-                           <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{event.title}</div>
-                           <div className="text-muted" style={{ fontSize: '0.85rem' }}>{event.location}</div>
-                         </div>
-                       </div>
-                       <div className={`ticket-status status-${event.status}`}>
-                         {event.status}
-                       </div>
-                     </div>
-                   );
-                 })}
-               </div>
-            ) : (
-              <p className="text-muted">No events created yet.</p>
-            )
-          )}
-        </div>
+              </AnimatePresence>
+              {(user.role === 'buyer' ? userTickets : userEvents).length === 0 && (
+                <div className="py-12 text-center">
+                  <p className="text-sm font-bold text-[var(--text-secondary)]">No recent data</p>
+                </div>
+              )}
+            </div>
+            <button className="w-full mt-8 py-4 rounded-2xl border border-[var(--border-glass)] text-[var(--text-secondary)] text-xs font-black uppercase tracking-widest hover:bg-white/5 transition-all">
+              View All History
+            </button>
+          </div>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 };
+

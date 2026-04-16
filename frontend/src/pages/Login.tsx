@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuthStore, type UserRole } from '../store/useAuthStore';
+import { useAuthStore } from '../store/useAuthStore';
+
+type UserRole = 'buyer' | 'organizer';
 import { GoogleLogin } from '@react-oauth/google';
 import { jwtDecode } from "jwt-decode";
 import { Sparkles, Ticket, CalendarDays } from 'lucide-react';
@@ -50,14 +52,14 @@ export const Login: React.FC = () => {
       <div className="auth-card glass" style={{ maxWidth: '540px' }}>
         <div className="auth-logo">
           <Sparkles className="text-accent" size={32} />
-          <span><span className="text-accent">Black</span>Nova</span>
+          <span><span className="text-accent">Nif</span>ting</span>
         </div>
         
         <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Welcome to the Future</h1>
         <p className="text-muted" style={{ marginBottom: '2rem' }}>Sign in to manage your immersive event experiences.</p>
         
         <div className="input-group" style={{ marginBottom: '2rem', textAlign: 'left' }}>
-          <label className="input-label" style={{ marginBottom: '1rem', display: 'block', textAlign: 'center' }}>How do you want to use BlackNova?</label>
+          <label className="input-label" style={{ marginBottom: '1rem', display: 'block', textAlign: 'center' }}>How do you want to use Nifting?</label>
           <div className="role-grid">
             <div 
               className={`role-box ${roleSelect === 'buyer' ? 'active' : ''}`}

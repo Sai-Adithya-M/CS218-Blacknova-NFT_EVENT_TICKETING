@@ -1,91 +1,91 @@
 import React, { useState } from 'react';
 import { useEventStore } from '../store/useEventStore';
-import { useTicketStore } from '../store/useTicketStore';
-import { useAuthStore } from '../store/useAuthStore';
-import { MapPin, Calendar, Clock, Image as ImageIcon } from 'lucide-react';
+import { EventCard } from '../components/events/EventCard';
+import { EventDetailModal } from '../components/events/EventDetailModal';
+import { FilterSidebar } from '../components/events/FilterSidebar';
+import { SlidersHorizontal, SearchX } from 'lucide-react';
+import { motion } from 'framer-motion';
+import type { Event } from '../store/useEventStore';
 
 export const BrowseEvents: React.FC = () => {
   const { events } = useEventStore();
-  const { buyTicket } = useTicketStore();
-  const { user, updateWallet } = useAuthStore();
-  const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
   const activeEvents = events.filter(e => e.status === 'active');
 
-  const handleBuy = (eventId: string, price: number) => {
-    if (!user) return;
-    
-    if (user.walletBalance < price) {
-      alert("Insufficient Balance in Wallet!");
-      return;
-    }
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
+  };
 
-    setPurchasingId(eventId);
-    // Simulate API call
-    setTimeout(() => {
-      updateWallet(-price);
-      buyTicket(eventId, user.id);
-      setPurchasingId(null);
-      alert("Ticket Purchased Successfully!");
-    }, 800);
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0 }
   };
 
   return (
-    <div>
-      <div className="page-header">
+    <motion.div 
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+      className="max-w-7xl mx-auto px-6 py-12"
+    >
+      <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
-          <h1 style={{ fontSize: '2rem', margin: 0 }}>Browse Events</h1>
-          <p className="text-muted">Discover and book the best experiences.</p>
+          <h1 className="text-4xl font-black tracking-tight mb-2 italic">MARKETPLACE</h1>
+          <p className="text-[var(--text-secondary)] max-w-lg font-medium">
+            Discover and trade digital collectible tickets for the world's most exclusive experiences.
+          </p>
+        </div>
+        
+        <button className="lg:hidden flex items-center gap-2 px-6 py-3 rounded-2xl glass-panel border border-white/10 font-bold text-sm">
+          <SlidersHorizontal size={18} />
+          Filters
+        </button>
+      </motion.div>
+
+      <div className="flex gap-12">
+        <motion.div variants={itemVariants} className="hidden lg:block">
+          <FilterSidebar />
+        </motion.div>
+        
+        <div className="flex-1">
+          {activeEvents.length > 0 ? (
+            <motion.div 
+              variants={containerVariants}
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8"
+            >
+              {activeEvents.map((event, i) => (
+                <motion.div 
+                  key={event.id} 
+                  variants={itemVariants} 
+                  onClick={() => setSelectedEvent(event)}
+                >
+                  <EventCard event={event} index={i} />
+                </motion.div>
+              ))}
+            </motion.div>
+          ) : (
+            <motion.div 
+              variants={itemVariants}
+              className="h-96 flex flex-col items-center justify-center glass-panel rounded-[3rem] border border-dashed border-white/10 text-center p-12"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-6">
+                <SearchX className="text-white/20" size={32} />
+              </div>
+              <h3 className="text-xl font-bold mb-2">No Events Yet</h3>
+              <p className="text-[var(--text-secondary)]">Be the first to create an event and list it on the marketplace.</p>
+            </motion.div>
+          )}
         </div>
       </div>
 
-      <div className="event-grid">
-        {activeEvents.map(event => {
-          const date = new Date(event.date);
-          return (
-            <div key={event.id} className="event-card glass">
-              <div className="event-image-placeholder">
-                <ImageIcon size={48} opacity={0.2} />
-              </div>
-              <div className="event-details">
-                <h3 className="event-title">{event.title}</h3>
-                <p className="text-muted" style={{ fontSize: '0.9rem', marginBottom: '1rem', height: '40px', overflow: 'hidden' }}>
-                  {event.description}
-                </p>
-                
-                <div className="event-meta">
-                  <div className="event-meta-item">
-                    <Calendar size={14} className="text-accent" />
-                    <span>{date.toLocaleDateString()}</span>
-                  </div>
-                  <div className="event-meta-item">
-                    <Clock size={14} className="text-accent" />
-                    <span>{date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                  </div>
-                </div>
-                
-                <div className="event-meta">
-                  <div className="event-meta-item">
-                    <MapPin size={14} className="text-accent" />
-                    <span>{event.location}</span>
-                  </div>
-                </div>
-
-                <div className="event-footer">
-                  <div className="event-price">${event.price.toFixed(2)}</div>
-                  <button 
-                    className="btn btn-primary"
-                    onClick={() => handleBuy(event.id, event.price)}
-                    disabled={purchasingId === event.id}
-                  >
-                    {purchasingId === event.id ? 'Processing...' : 'Buy Ticket'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+      {/* Event Detail / Purchase Modal */}
+      <EventDetailModal 
+        event={selectedEvent}
+        isOpen={!!selectedEvent}
+        onClose={() => setSelectedEvent(null)}
+      />
+    </motion.div>
   );
 };
