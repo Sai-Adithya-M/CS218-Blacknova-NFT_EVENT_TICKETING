@@ -1,9 +1,9 @@
 // main.js — App entry point
 import { ethers } from 'ethers';
 import { connectWallet, disconnectWallet, silentConnect, switchToSepolia, getCurrentAccount, truncateAddress, setupWalletListeners, getProvider, getSigner } from './modules/wallet.js';
-import { createEvent, loadEvents, renderEvents } from './modules/events.js';
-import { loadMyTickets, renderMyTickets } from './modules/tickets.js';
-import { loadResaleListings, renderMarketplace } from './modules/marketplace.js';
+import { createEvent, fetchData as loadEvents, renderEvents } from './modules/events.js';
+import { fetchData as loadMyTickets, renderMyTickets } from './modules/tickets.js';
+import { fetchData as loadResaleListings, renderMarketplace } from './modules/marketplace.js';
 import contractABI from './contracts/NFTTicket.json';
 
 // ============================

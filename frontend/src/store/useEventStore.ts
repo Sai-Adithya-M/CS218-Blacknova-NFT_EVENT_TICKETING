@@ -1,71 +1,114 @@
 import { create } from 'zustand';
+import { ethers } from 'ethers';
+import { config } from '../config';
+
+const ABI = [
+  "function nextEventId() public view returns (uint)",
+  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))"
+];
+
+export interface TicketTier {
+  id: string;
+  name: string;
+  price: number;
+  supply: number;
+  sold: number;
+}
 
 export interface Event {
   id: string;
   title: string;
   description: string;
   date: string;
-  price: number;
-  totalTickets: number;
   location: string;
+  category: string;
   organizerId: string;
   status: 'active' | 'past';
   imageUrl?: string;
+  tiers: TicketTier[];
 }
 
 interface EventState {
   events: Event[];
-  createEvent: (event: Omit<Event, 'id' | 'status'>) => void;
+  createEvent: (event: Omit<Event, 'id' | 'status'> & { id?: string }) => void;
+  incrementTierSold: (eventId: string, tierId: string) => void;
+  fetchEventsFromChain: () => Promise<void>;
 }
 
-// Initial demo data
-const DEMO_EVENTS: Event[] = [
-  {
-    id: 'e1',
-    title: 'Neon Nights Festival',
-    description: 'A 3-day electronic music festival featuring top DJs.',
-    date: '2026-08-15T20:00:00Z',
-    price: 120.00,
-    totalTickets: 500,
-    location: 'Cyber Arena, Neo Tokyo',
-    organizerId: 'org1',
-    status: 'active'
-  },
-  {
-    id: 'e2',
-    title: 'Tech Conference 2026',
-    description: 'The biggest future tech conference of the year.',
-    date: '2026-05-10T09:00:00Z',
-    price: 450.00,
-    totalTickets: 200,
-    location: 'Silicon Valley Center',
-    organizerId: 'org1',
-    status: 'active'
-  },
-  {
-    id: 'e3',
-    title: 'Past Summer Jam',
-    description: 'A relaxing outdoor acoustic concert.',
-    date: '2023-07-20T18:00:00Z',
-    price: 45.00,
-    totalTickets: 100,
-    location: 'Central Park',
-    organizerId: 'org2',
-    status: 'past'
-  }
-];
-
 export const useEventStore = create<EventState>((set) => ({
-  events: DEMO_EVENTS,
+  events: [],
   
   createEvent: (eventData) => set((state) => ({
     events: [
       ...state.events, 
       { 
         ...eventData, 
-        id: `e${Date.now()}`, 
+        id: eventData.id || `evt_${Date.now()}`, 
         status: 'active' 
       }
     ]
-  }))
+  })),
+
+  incrementTierSold: (eventId, tierId) => set((state) => ({
+    events: state.events.map(e => 
+      e.id === eventId 
+        ? { 
+            ...e, 
+            tiers: e.tiers.map(t => 
+              t.id === tierId ? { ...t, sold: t.sold + 1 } : t
+            ) 
+          } 
+        : e
+    )
+  })),
+
+  fetchEventsFromChain: async () => {
+    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") return;
+
+    try {
+      let provider;
+      if ((window as any).ethereum) {
+        provider = new ethers.BrowserProvider((window as any).ethereum);
+      } else {
+        provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+      }
+
+      const contract = new ethers.Contract(config.contractAddress, ABI, provider);
+      const nextEventId = await contract.nextEventId();
+      const loadedEvents: Event[] = [];
+
+      for (let i = 1; i < Number(nextEventId); i++) {
+        try {
+          const evt = await contract.fetchEventData(i);
+          if (evt.exists || evt[6]) { // Support both array index and object key
+            loadedEvents.push({
+              id: `evt_${i}`,
+              title: evt.name || evt[0],
+              description: 'Loaded from Blockchain',
+              date: new Date().toISOString(),
+              location: 'Decentralized',
+              category: 'Music & Concerts',
+              organizerId: evt.organiser || evt[4],
+              status: 'active',
+              tiers: [
+                {
+                  id: `tier_evt_${i}`,
+                  name: 'General Access',
+                  price: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
+                  supply: Number(evt.maxTickets || evt[1]),
+                  sold: Number(evt.ticketsSold || evt[3])
+                }
+              ]
+            });
+          }
+        } catch (e) {
+          console.error(`fetchEventData error for event ${i}:`, e);
+        }
+      }
+
+      set({ events: loadedEvents });
+    } catch (err) {
+      console.error('fetchEventsFromChain error:', err);
+    }
+  }
 }));

@@ -1,0 +1,44 @@
+:root {
+  /* Colors */
+  --bg-primary: #0B0B0F;
+  --bg-secondary: #16161D;
+  --bg-glass: rgba(22, 22, 29, 0.7);
+  
+  --text-primary: #F5F5F0;
+  --text-secondary: rgba(245, 245, 240, 0.7);
+  
+  --accent-purple: #8B5CF6;
+  --accent-teal: #14B8A6;
+  --success-green: #22C55E;
+  
+  --border-glass: rgba(255, 255, 255, 0.1);
+  --border-glow-purple: rgba(139, 92, 246, 0.3);
+  --border-glow-teal: rgba(20, 184, 166, 0.3);
+
+  /* Shadows & Glows */
+  --glow-purple: 0 0 15px rgba(139, 92, 246, 0.4);
+  --glow-teal: 0 0 15px rgba(20, 184, 166, 0.4);
+}
+
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-glass);
+}
+
+.glow-border-purple {
+  border: 1px solid var(--accent-purple);
+  box-shadow: var(--glow-purple);
+}
+
+.glow-border-teal {
+  border: 1px solid var(--accent-teal);
+  box-shadow: var(--glow-teal);
+}
+
+.text-gradient-purple {
+  background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

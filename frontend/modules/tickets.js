@@ -7,7 +7,7 @@ import { showToast, showLoading, hideLoading } from '../main.js';
 /**
  * Load all tickets owned by the current user
  */
-export async function loadMyTickets() {
+export async function fetchData() {
   const contract = getReadContract();
   const account = getCurrentAccount();
   if (!account) return [];
@@ -27,8 +27,6 @@ export async function loadMyTickets() {
           tokenId: i,
           eventId: Number(eventId),
           eventName: evt.name,
-          originalPriceWei: evt.priceWei,
-          royaltyBps: Number(evt.royaltyBps),
           isListed: listing.active,
           listingPrice: listing.active ? listing.priceWei : null,
         });
@@ -65,28 +63,6 @@ export async function listForResale(tokenId, priceEth) {
 }
 
 /**
- * Cancel a resale listing (also available from My Tickets)
- */
-async function cancelListingFromTickets(tokenId) {
-  const contract = await getContract();
-
-  showLoading('Cancelling listing...');
-  try {
-    const tx = await contract.cancelResaleListing(tokenId);
-    showLoading('Waiting for confirmation...');
-    await tx.wait();
-    showToast('Listing cancelled', 'success');
-    return true;
-  } catch (err) {
-    console.error('cancelListing error:', err);
-    showToast(err.reason || err.message || 'Failed to cancel listing', 'error');
-    return false;
-  } finally {
-    hideLoading();
-  }
-}
-
-/**
  * Render the user's tickets into the given container
  */
 export function renderMyTickets(tickets, container, onRefresh) {
@@ -105,78 +81,43 @@ export function renderMyTickets(tickets, container, onRefresh) {
 
   tickets.forEach((ticket) => {
     const card = document.createElement('div');
-
-    if (ticket.isListed) {
-      // ===== RESALE THEME =====
-      const listingPriceEth = ethers.formatEther(ticket.listingPrice);
-      const originalPriceEth = ethers.formatEther(ticket.originalPriceWei);
-      const royaltyPercent = ticket.royaltyBps / 100;
-
-      card.className = 'card ticket-card ticket-resale';
-      card.innerHTML = `
-        <div class="resale-banner">
-          <span class="resale-banner-icon">🔄</span>
-          <span>ON RESALE</span>
+    card.className = 'card ticket-card';
+    card.innerHTML = `
+      <div class="card-header">
+        <h3 class="card-title">${escapeHtml(ticket.eventName)}</h3>
+        <span class="card-badge ${ticket.isListed ? 'badge-listed' : 'badge-owned'}">
+          ${ticket.isListed ? '📢 LISTED' : '✅ OWNED'}
+        </span>
+      </div>
+      <div class="card-body">
+        <div class="card-stat">
+          <span class="stat-label">Token ID</span>
+          <span class="stat-value">#${ticket.tokenId}</span>
         </div>
-        <div class="card-header">
-          <h3 class="card-title">${escapeHtml(ticket.eventName)}</h3>
-          <span class="card-badge badge-listed">LISTED</span>
+        <div class="card-stat">
+          <span class="stat-label">Event ID</span>
+          <span class="stat-value">#${ticket.eventId}</span>
         </div>
-        <div class="card-body">
+        ${ticket.isListed ? `
           <div class="card-stat">
-            <span class="stat-label">Token ID</span>
-            <span class="stat-value">#${ticket.tokenId}</span>
+            <span class="stat-label">Listed Price</span>
+            <span class="stat-value">${ethers.formatEther(ticket.listingPrice)} ETH</span>
           </div>
-          <div class="card-stat">
-            <span class="stat-label">Event ID</span>
-            <span class="stat-value">#${ticket.eventId}</span>
-          </div>
-          <div class="resale-price-box">
-            <div class="resale-price-row">
-              <span class="resale-price-label">Listing Price</span>
-              <span class="resale-price-value">${listingPriceEth} ETH</span>
-            </div>
-            <div class="resale-price-detail">
-              <span>Original: ${originalPriceEth} ETH</span>
-              <span>Royalty: ${royaltyPercent}%</span>
-            </div>
-          </div>
-          <div class="resale-status-bar">
-            <span class="resale-pulse"></span>
-            <span class="resale-status-text">Live on marketplace</span>
-          </div>
-        </div>
-        <div class="card-footer">
-          <button class="btn btn-danger cancel-listing-btn" data-token-id="${ticket.tokenId}">✕ Cancel Listing</button>
-        </div>
-      `;
-    } else {
-      // ===== NORMAL OWNED TICKET =====
-      card.className = 'card ticket-card';
-      card.innerHTML = `
-        <div class="card-header">
-          <h3 class="card-title">${escapeHtml(ticket.eventName)}</h3>
-          <span class="card-badge badge-owned">OWNED</span>
-        </div>
-        <div class="card-body">
-          <div class="card-stat">
-            <span class="stat-label">Token ID</span>
-            <span class="stat-value">#${ticket.tokenId}</span>
-          </div>
-          <div class="card-stat">
-            <span class="stat-label">Event ID</span>
-            <span class="stat-value">#${ticket.eventId}</span>
-          </div>
-        </div>
+        ` : ''}
+      </div>
+      ${!ticket.isListed ? `
         <div class="card-footer resale-form-container">
           <div class="resale-form">
             <input type="number" step="0.001" min="0.001" placeholder="Price in ETH" class="input resale-price-input" id="resale-price-${ticket.tokenId}" />
             <button class="btn btn-accent list-resale-btn" data-token-id="${ticket.tokenId}">List for Resale</button>
           </div>
         </div>
-      `;
-    }
-
+      ` : `
+        <div class="card-footer">
+          <span class="listed-info">Currently listed on marketplace</span>
+        </div>
+      `}
+    `;
     container.appendChild(card);
   });
 
@@ -193,17 +134,6 @@ export function renderMyTickets(tickets, container, onRefresh) {
       }
 
       const success = await listForResale(tokenId, priceEth);
-      if (success && onRefresh) {
-        onRefresh();
-      }
-    });
-  });
-
-  // Attach cancel listing listeners
-  container.querySelectorAll('.cancel-listing-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const tokenId = btn.dataset.tokenId;
-      const success = await cancelListingFromTickets(tokenId);
       if (success && onRefresh) {
         onRefresh();
       }
