@@ -55,7 +55,12 @@ function AppContent() {
       (window as any).ethereum.on('chainChanged', () => {
         window.location.reload();
       });
-      (window as any).ethereum.on('accountsChanged', () => {
+      (window as any).ethereum.on('accountsChanged', (accounts: string[]) => {
+        if (accounts.length === 0) {
+          useAuthStore.getState().logout();
+        } else if (user?.walletAddress && accounts[0].toLowerCase() !== user.walletAddress.toLowerCase()) {
+          useAuthStore.getState().logout();
+        }
         window.location.reload();
       });
     }

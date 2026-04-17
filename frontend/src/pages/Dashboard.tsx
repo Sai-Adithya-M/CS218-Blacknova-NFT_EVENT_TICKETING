@@ -43,6 +43,33 @@ export const Dashboard: React.FC = () => {
   const userTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
   const userEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
 
+  const marketVolume = events.reduce((acc, event) => 
+    acc + event.tiers.reduce((tierAcc, tier) => tierAcc + (tier.price * tier.sold), 0)
+  , 0);
+
+  const [networkSpeed, setNetworkSpeed] = useState<number>(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const measurePing = async () => {
+      try {
+        const start = performance.now();
+        await fetch('https://rpc2.sepolia.org', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+        });
+        const end = performance.now();
+        if (mounted) setNetworkSpeed(Math.floor(end - start));
+      } catch (e) {
+        if (mounted) setNetworkSpeed(0);
+      }
+    };
+    measurePing();
+    const interval = setInterval(measurePing, 10000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -85,8 +112,8 @@ export const Dashboard: React.FC = () => {
         {[
           { label: 'Total Balance', value: user.walletBalance, icon: Wallet, color: 'text-[var(--accent-teal)]', trend: '+12.5%', isUp: true, suffix: ' ETH' },
           { label: 'Active Assets', value: user.role === 'buyer' ? userTickets.length : userEvents.length, icon: Ticket, color: 'text-[var(--accent-purple)]', trend: '+2', isUp: true },
-          { label: 'Market Volume', value: 48.2, icon: TrendingUp, color: 'text-white', trend: '-2.4%', isUp: false, suffix: ' ETH' },
-          { label: 'Network Speed', value: 12, icon: Zap, iconColor: 'text-yellow-400', trend: 'Optimal', isUp: true, suffix: 'ms' }
+          { label: 'Market Volume', value: marketVolume, icon: TrendingUp, color: 'text-white', trend: marketVolume > 0 ? '+Active' : 'Neutral', isUp: marketVolume > 0, suffix: ' ETH' },
+          { label: 'Network Speed', value: networkSpeed || '--', icon: Zap, iconColor: 'text-yellow-400', trend: 'Live Ping', isUp: true, suffix: 'ms' }
         ].map((stat, i) => (
           <motion.div 
             key={i} 

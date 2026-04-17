@@ -435,11 +435,9 @@ export const ManageEvents: React.FC = () => {
                         </div>
                         <a 
                           href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
                           className="flex items-center gap-1.5 text-[9px] font-bold text-white/40 hover:text-white transition-all uppercase tracking-widest"
                         >
-                          Explorer <ExternalLink size={10} />
+                          View in Etherscan <ExternalLink size={10} />
                         </a>
                       </div>
 
