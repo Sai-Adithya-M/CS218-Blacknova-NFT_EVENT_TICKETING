@@ -4,7 +4,8 @@ import { config } from '../config';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
-  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))"
+  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))",
+  "event EventCreated(uint indexed eventId, address indexed organiser, string name)"
 ];
 
 export interface TicketTier {
@@ -63,26 +64,45 @@ export const useEventStore = create<EventState>((set) => ({
   })),
 
   fetchEventsFromChain: async () => {
-    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") return;
+    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
+      console.error("Contract address is undefined. Cannot connect to contract.");
+      return;
+    }
 
     try {
       let provider;
       if ((window as any).ethereum) {
         provider = new ethers.BrowserProvider((window as any).ethereum);
+        try {
+          const network = await provider.getNetwork();
+          if (network.chainId !== 11155111n && network.chainId !== 11155111) {
+             console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
+             provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+          }
+        } catch (networkErr) {
+          console.error("Failed to fetch network", networkErr);
+          provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+        }
       } else {
         provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
       }
 
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
-      const nextEventId = await contract.nextEventId();
+      
+      const filter = contract.filters.EventCreated();
+      const eventLogs = await contract.queryFilter(filter, 0, "latest");
+      
       const loadedEvents: Event[] = [];
 
-      for (let i = 1; i < Number(nextEventId); i++) {
+      for (const log of eventLogs) {
         try {
-          const evt = await contract.fetchEventData(i);
+          const eventId = (log as any).args ? (log as any).args[0] : contract.interface.parseLog(log as any)?.args?.eventId;
+          if (!eventId) continue;
+
+          const evt = await contract.fetchEventData(eventId);
           if (evt.exists || evt[6]) { // Support both array index and object key
             loadedEvents.push({
-              id: `evt_${i}`,
+              id: `evt_${eventId.toString()}`,
               title: evt.name || evt[0],
               description: 'Loaded from Blockchain',
               date: new Date().toISOString(),
@@ -92,7 +112,7 @@ export const useEventStore = create<EventState>((set) => ({
               status: 'active',
               tiers: [
                 {
-                  id: `tier_evt_${i}`,
+                  id: `tier_evt_${eventId.toString()}`,
                   name: 'General Access',
                   price: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
                   supply: Number(evt.maxTickets || evt[1]),
@@ -102,7 +122,7 @@ export const useEventStore = create<EventState>((set) => ({
             });
           }
         } catch (e) {
-          console.error(`fetchEventData error for event ${i}:`, e);
+          console.error(`fetchEventData error for event ${log.transactionHash}:`, e);
         }
       }
 
