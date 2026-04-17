@@ -71,7 +71,7 @@ export const useTicketStore = create<TicketState>((set) => ({
 
   listForResale: (ticketId, price) => set((state) => ({
     tickets: state.tickets.map(t => 
-      t.id === ticketId ? { ...t, status: 'resale' as TicketStatus, resalePrice: price, resaleLink: `https://sepolia.etherscan.io/tx/${t.txHash}` } : t
+      t.id === ticketId ? { ...t, status: 'resale' as TicketStatus, resalePrice: price, resaleLink: `https://sepolia.etherscan.io/nft/${config.contractAddress}/${t.tokenId}` } : t
     )
   })),
 

@@ -41,7 +41,7 @@ export const ManageEvents: React.FC = () => {
 
   if (!user) return <AuthFallback />;
 
-  const myEvents = events.filter(e => e.organizerId === user.id);
+  const myEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
 
   const addTier = () => {
     setTiers([...tiers, { name: '', price: '', supply: '50' }]);

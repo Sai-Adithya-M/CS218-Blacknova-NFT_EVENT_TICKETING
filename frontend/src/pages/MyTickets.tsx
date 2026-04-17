@@ -20,7 +20,7 @@ export const MyTickets: React.FC = () => {
 
   if (!user) return <AuthFallback />;
 
-  const myTickets = tickets.filter(t => t.ownerId === user.id);
+  const myTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
 
   const handleResale = async (ticket: any) => {
     const priceStr = prompt("Enter resale price (ETH):");
@@ -178,7 +178,7 @@ export const MyTickets: React.FC = () => {
                   <div className="flex items-center gap-2">
                     {/* Etherscan link */}
                     <a
-                      href={`https://sepolia.etherscan.io/tx/${ticket.txHash}`}
+                      href={`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"

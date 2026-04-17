@@ -40,8 +40,8 @@ export const Dashboard: React.FC = () => {
 
   if (!user) return <AuthFallback />;
 
-  const userTickets = tickets.filter(t => t.ownerId === user.id);
-  const userEvents = events.filter(e => e.organizerId === user.id);
+  const userTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
+  const userEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
 
   const containerVariants = {
     hidden: { opacity: 0 },
