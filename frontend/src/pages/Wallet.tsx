@@ -1,13 +1,58 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
+import { useTicketStore } from '../store/useTicketStore';
+import { useEventStore } from '../store/useEventStore';
 import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Activity, Zap, ShieldCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { AuthFallback } from '../components/ui/AuthFallback';
+import { ethers } from 'ethers';
 
 export const Wallet: React.FC = () => {
   const { user } = useAuthStore();
+  const { tickets } = useTicketStore();
+  const { events } = useEventStore();
+  const [gasEstimate, setGasEstimate] = useState<string>('--');
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchGas = async () => {
+      try {
+        if ((window as any).ethereum) {
+          const provider = new ethers.BrowserProvider((window as any).ethereum);
+          const feeData = await provider.getFeeData();
+          if (feeData.gasPrice && mounted) {
+            setGasEstimate(ethers.formatUnits(feeData.gasPrice, 'gwei').split('.')[0]);
+          }
+        }
+      } catch (e) {}
+    };
+    fetchGas();
+    const interval = setInterval(fetchGas, 15000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
 
   if (!user) return <AuthFallback />;
+
+  const userTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
+  const userEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
+
+  const transactions = user.role === 'buyer' 
+    ? userTickets.map(t => ({
+        id: t.id,
+        type: 'Purchase',
+        amount: `-${t.tierPrice.toFixed(4)} ETH`,
+        date: new Date(t.purchasedAt).toLocaleDateString(),
+        status: 'SUCCESS',
+        isNegative: true,
+      }))
+    : userEvents.map(e => ({
+        id: e.id,
+        type: 'Deploy Event',
+        amount: '0.0000 ETH',
+        date: new Date(e.date).toLocaleDateString(),
+        status: 'SUCCESS',
+        isNegative: true,
+      }));
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -89,32 +134,31 @@ export const Wallet: React.FC = () => {
             </div>
             
             <div className="space-y-6">
-              {[
-                { type: 'Deposit', amount: '0.5000 ETH', date: 'Oct 24, 2026', status: 'SUCCESS' },
-                { type: 'Purchase', amount: '-0.1200 ETH', date: 'Oct 22, 2026', status: 'SUCCESS' },
-                { type: 'Resale', amount: '+0.1500 ETH', date: 'Oct 20, 2026', status: 'SUCCESS' },
-                { type: 'Withdraw', amount: '-0.0500 ETH', date: 'Oct 15, 2026', status: 'SUCCESS' }
-              ].map((tx, i) => (
-                <div key={i} className="flex items-center justify-between p-6 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-white/20 transition-all group">
+              {transactions.length > 0 ? transactions.map((tx) => (
+                <div key={tx.id} className="flex items-center justify-between p-6 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-white/20 transition-all group">
                   <div className="flex items-center gap-6">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                      tx.type === 'Deposit' || tx.type === 'Resale' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                      !tx.isNegative ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
                     }`}>
-                      {tx.type === 'Deposit' || tx.type === 'Resale' ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
+                      {!tx.isNegative ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
                     </div>
                     <div>
-                      <p className="font-black uppercase italic tracking-tight mb-1">{tx.type} ETH</p>
+                      <p className="font-black uppercase italic tracking-tight mb-1">{tx.type}</p>
                       <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)]">{tx.date}</p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className={`font-black uppercase italic tracking-tight mb-1 ${
-                      tx.type === 'Deposit' || tx.type === 'Resale' ? 'text-[var(--status-success)]' : 'text-white'
+                      !tx.isNegative ? 'text-[var(--status-success)]' : 'text-white'
                     }`}>{tx.amount}</p>
                     <p className="text-[8px] font-black tracking-widest text-[var(--text-secondary)]">{tx.status}</p>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <div className="py-12 text-center text-white/40 text-sm font-bold uppercase tracking-widest">
+                  No Past Transactions found locally via Provider
+                </div>
+              )}
             </div>
           </motion.div>
 
@@ -127,16 +171,16 @@ export const Wallet: React.FC = () => {
                 </div>
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)] italic">Gas Estimates</h4>
               </div>
-              <p className="text-2xl font-black uppercase italic tracking-tight">12 <span className="text-xs text-[var(--text-secondary)]">GWEI</span></p>
+              <p className="text-2xl font-black uppercase italic tracking-tight">{gasEstimate} <span className="text-xs text-[var(--text-secondary)]">GWEI</span></p>
             </motion.div>
             <motion.div variants={itemVariants} className="glass-panel p-8 rounded-[2rem] border border-white/5">
               <div className="flex items-center gap-4 mb-4">
                 <div className="w-10 h-10 rounded-xl bg-[var(--accent-purple)]/10 flex items-center justify-center text-[var(--accent-purple)]">
                   <Activity size={20} />
                 </div>
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)] italic">Portfolio Change</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)] italic">Owned Assets Count</h4>
               </div>
-              <p className="text-2xl font-black uppercase italic tracking-tight text-[var(--status-success)]">+12.4%</p>
+              <p className="text-2xl font-black uppercase italic tracking-tight text-[var(--status-success)]">{userTickets.length + userEvents.length}</p>
             </motion.div>
           </div>
         </div>

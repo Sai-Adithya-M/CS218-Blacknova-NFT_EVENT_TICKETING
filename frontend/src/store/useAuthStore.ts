@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface User {
   id: string;
@@ -21,37 +22,45 @@ interface AuthState {
   setBalance: (balance: number) => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null, 
-  isAuthenticated: false,
-  walletAddress: null,
-  
-  login: (userData) => set({ 
-    user: { ...userData, walletBalance: 150.00 },
-    isAuthenticated: true,
-    walletAddress: userData.walletAddress || null
-  }),
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      user: null, 
+      isAuthenticated: false,
+      walletAddress: null,
+      
+      login: (userData) => set({ 
+        user: { ...userData, walletBalance: 150.00 },
+        isAuthenticated: true,
+        walletAddress: userData.walletAddress || null
+      }),
 
-  loginWithWallet: (address, balance) => set({
-    user: {
-      id: address,
-      name: `${address.slice(0, 6)}...${address.slice(-4)}`,
-      email: '',
-      walletAddress: address,
-      walletBalance: balance,
-      role: 'organizer', // wallet users get organizer access
-    },
-    isAuthenticated: true,
-    walletAddress: address,
-  }),
-  
-  logout: () => set({ user: null, isAuthenticated: false, walletAddress: null }),
-  
-  updateWallet: (amount) => set((state) => ({
-    user: state.user ? { ...state.user, walletBalance: state.user.walletBalance + amount } : null
-  })),
+      loginWithWallet: (address, balance) => set({
+        user: {
+          id: address,
+          name: `${address.slice(0, 6)}...${address.slice(-4)}`,
+          email: '',
+          walletAddress: address,
+          walletBalance: balance,
+          role: 'organizer', // wallet users get organizer access
+        },
+        isAuthenticated: true,
+        walletAddress: address,
+      }),
+      
+      logout: () => set({ user: null, isAuthenticated: false, walletAddress: null }),
+      
+      updateWallet: (amount) => set((state) => ({
+        user: state.user ? { ...state.user, walletBalance: state.user.walletBalance + amount } : null
+      })),
 
-  setBalance: (balance) => set((state) => ({
-    user: state.user ? { ...state.user, walletBalance: balance } : null
-  }))
-}));
+      setBalance: (balance) => set((state) => ({
+        user: state.user ? { ...state.user, walletBalance: balance } : null
+      }))
+    }),
+    {
+      name: 'auth-storage',
+      storage: createJSONStorage(() => sessionStorage),
+    }
+  )
+);
