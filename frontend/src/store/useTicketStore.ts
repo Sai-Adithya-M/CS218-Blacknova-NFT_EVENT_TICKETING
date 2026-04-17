@@ -71,7 +71,7 @@ export const useTicketStore = create<TicketState>((set) => ({
 
   listForResale: (ticketId, price) => set((state) => ({
     tickets: state.tickets.map(t => 
-      t.id === ticketId ? { ...t, status: 'resale' as TicketStatus, resalePrice: price, resaleLink: `https://sepolia.etherscan.io/tx/${t.txHash}` } : t
+      t.id === ticketId ? { ...t, status: 'resale' as TicketStatus, resalePrice: price, resaleLink: `https://sepolia.etherscan.io/nft/${config.contractAddress}/${t.tokenId}` } : t
     )
   })),
 
@@ -88,12 +88,25 @@ export const useTicketStore = create<TicketState>((set) => ({
   })),
 
   fetchTicketsFromChain: async (userAddress?: string) => {
-    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") return;
+    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
+      console.error("Contract address is undefined. Cannot connect to contract.");
+      return;
+    }
 
     try {
       let provider;
       if ((window as any).ethereum) {
         provider = new ethers.BrowserProvider((window as any).ethereum);
+        try {
+          const network = await provider.getNetwork();
+          if (network.chainId !== 11155111n && network.chainId !== 11155111) {
+             console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
+             provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+          }
+        } catch (networkErr) {
+          console.error("Failed to fetch network", networkErr);
+          provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+        }
       } else {
         provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
       }
