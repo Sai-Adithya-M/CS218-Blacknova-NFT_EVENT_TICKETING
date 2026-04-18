@@ -19,6 +19,10 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         address organiser;
         uint96 royaltyBps; // e.g., 500 = 5%
         bool exists;
+        uint eventDate;
+        bool cancelled;
+        uint escrowBalance;
+        uint activeTickets;
     }
 
     struct ResaleListing {
@@ -36,14 +40,20 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     event TicketListed(uint indexed tokenId, address indexed seller, uint priceWei);
     event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei);
     event ListingCancelled(uint indexed tokenId);
+    
+    event EventCancelled(uint indexed eventId);
+    event TicketCancelled(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint refundAmount);
+    event TicketRefunded(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint refundAmount);
+    event FundsWithdrawn(uint indexed eventId, address indexed organiser, uint amount);
 
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps) public {
+    function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps, uint eventDate) public {
         require(bytes(name).length > 0, "Name cannot be empty");
         require(maxTickets > 0, "Must have tickets");
         require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
+        require(eventDate > block.timestamp, "Event date must be in the future");
 
         events[nextEventId] = Event({
             name: name,
@@ -52,7 +62,11 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
             ticketsSold: 0,
             organiser: msg.sender,
             royaltyBps: royaltyBps,
-            exists: true
+            exists: true,
+            eventDate: eventDate,
+            cancelled: false,
+            escrowBalance: 0,
+            activeTickets: 0
         });
 
         emit EventCreated(nextEventId, msg.sender, name);
@@ -62,6 +76,8 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     function buyTicket(uint eventId) public payable nonReentrant {
         Event storage evt = events[eventId];
         require(evt.exists, "Event does not exist");
+        require(!evt.cancelled, "Event is cancelled");
+        require(msg.sender != evt.organiser, "Organizer cannot buy tickets for their own event");
         require(msg.value == evt.priceWei, "Incorrect ETH amount");
         require(evt.ticketsSold < evt.maxTickets, "Sold out");
 
@@ -69,14 +85,104 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         nextTokenId++;
 
         evt.ticketsSold++;
+        evt.activeTickets++;
+        evt.escrowBalance += msg.value;
         tokenToEvent[tokenId] = eventId;
         
         _safeMint(msg.sender, tokenId);
         
-        (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
-        require(success, "Transfer failed");
-
+        // Removed instant transfer to organiser to facilitate escrow and refunds
         emit TicketMinted(tokenId, eventId, msg.sender);
+    }
+    
+    // --- Escrow and Cancellation Functions ---
+
+    function cancelEvent(uint eventId) public {
+        Event storage evt = events[eventId];
+        require(evt.exists, "Event does not exist");
+        require(msg.sender == evt.organiser, "Not the organiser");
+        require(!evt.cancelled, "Already cancelled");
+        require(block.timestamp < evt.eventDate, "Event has already occurred");
+        
+        evt.cancelled = true;
+        emit EventCancelled(eventId);
+    }
+
+    function cancelTicket(uint tokenId) public nonReentrant {
+        require(ownerOf(tokenId) == msg.sender, "Not the owner");
+        
+        uint eventId = tokenToEvent[tokenId];
+        Event storage evt = events[eventId];
+        
+        require(!evt.cancelled, "Event cancelled, use claimRefund");
+        require(block.timestamp < evt.eventDate, "Event already started/finished");
+
+        // Refund 50%
+        uint refundAmount = evt.priceWei / 2;
+        
+        evt.activeTickets--;
+        evt.escrowBalance -= refundAmount; // Remaining 50% stays in escrow for the organiser
+
+        if (resaleListings[tokenId].active) {
+            delete resaleListings[tokenId];
+        }
+
+        _burn(tokenId);
+        emit TicketCancelled(tokenId, eventId, msg.sender, refundAmount);
+
+        (bool success, ) = payable(msg.sender).call{value: refundAmount}("");
+        require(success, "Refund failed");
+    }
+
+    function claimRefund(uint tokenId) public nonReentrant {
+        require(ownerOf(tokenId) == msg.sender, "Not the owner");
+        
+        uint eventId = tokenToEvent[tokenId];
+        Event storage evt = events[eventId];
+        
+        require(evt.cancelled, "Event not cancelled");
+
+        uint refundAmount = evt.priceWei;
+        
+        evt.activeTickets--;
+        evt.escrowBalance -= refundAmount;
+
+        if (resaleListings[tokenId].active) {
+            delete resaleListings[tokenId];
+        }
+
+        _burn(tokenId);
+        emit TicketRefunded(tokenId, eventId, msg.sender, refundAmount);
+
+        (bool success, ) = payable(msg.sender).call{value: refundAmount}("");
+        require(success, "Refund failed");
+    }
+
+    function withdrawEventFunds(uint eventId) public nonReentrant {
+        Event storage evt = events[eventId];
+        require(evt.exists, "Event does not exist");
+        require(msg.sender == evt.organiser, "Not the organiser");
+        require(
+            (block.timestamp >= evt.eventDate && !evt.cancelled) || evt.cancelled,
+            "Cannot withdraw yet"
+        );
+        
+        uint amount;
+        if (evt.cancelled) {
+            uint totalRefundsNeeded = evt.activeTickets * evt.priceWei;
+            require(evt.escrowBalance > totalRefundsNeeded, "No extra funds to withdraw");
+            amount = evt.escrowBalance - totalRefundsNeeded;
+        } else {
+            amount = evt.escrowBalance;
+        }
+
+        require(amount > 0, "No funds to withdraw");
+        evt.escrowBalance -= amount;
+
+        emit FundsWithdrawn(eventId, msg.sender, amount);
+
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Withdraw failed");
     }
 
     // --- Marketplace Functions ---

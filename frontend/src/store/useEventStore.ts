@@ -4,7 +4,7 @@ import { config } from '../config';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
-  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))"
+  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists, uint eventDate, bool cancelled, uint escrowBalance, uint activeTickets))"
 ];
 
 export interface TicketTier {
@@ -26,12 +26,14 @@ export interface Event {
   status: 'active' | 'past';
   imageUrl?: string;
   tiers: TicketTier[];
+  cancelled?: boolean;
 }
 
 interface EventState {
   events: Event[];
   createEvent: (event: Omit<Event, 'id' | 'status'> & { id?: string }) => void;
   incrementTierSold: (eventId: string, tierId: string) => void;
+  markEventCancelled: (eventId: string) => void;
   fetchEventsFromChain: () => Promise<void>;
 }
 
@@ -62,6 +64,10 @@ export const useEventStore = create<EventState>((set) => ({
     )
   })),
 
+  markEventCancelled: (eventId) => set((state) => ({
+    events: state.events.map(e => e.id === eventId ? { ...e, cancelled: true } : e)
+  })),
+
   fetchEventsFromChain: async () => {
     if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") return;
 
@@ -90,6 +96,7 @@ export const useEventStore = create<EventState>((set) => ({
               category: 'Music & Concerts',
               organizerId: evt.organiser || evt[4],
               status: 'active',
+              cancelled: evt.cancelled !== undefined ? evt.cancelled : (evt[8] || false),
               tiers: [
                 {
                   id: `tier_evt_${i}`,

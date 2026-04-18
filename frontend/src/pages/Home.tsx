@@ -62,7 +62,7 @@ export const Home: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const activeEvents = events.filter(e => e.status === 'active').slice(0, 6);
+  const activeEvents = events.filter(e => e.status === 'active' && !e.cancelled).slice(0, 6);
 
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);

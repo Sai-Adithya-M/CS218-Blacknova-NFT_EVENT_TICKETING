@@ -10,7 +10,8 @@ import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
 
 const ABI = [
-  "function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps) public",
+  "function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps, uint eventDate) public",
+  "function cancelEvent(uint eventId) public",
   "event EventCreated(uint indexed eventId, address indexed organiser, string name)"
 ];
 
@@ -21,7 +22,7 @@ interface TierFormData {
 }
 
 export const ManageEvents: React.FC = () => {
-  const { events, createEvent } = useEventStore();
+  const { events, createEvent, markEventCancelled } = useEventStore();
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
@@ -103,8 +104,17 @@ export const ManageEvents: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
+      // Convert date string to unix timestamp
+      const eventTimestamp = Math.floor(new Date(formData.date).getTime() / 1000);
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      
+      // Frontend Validation: EVM requires eventDate > block.timestamp
+      if (eventTimestamp <= currentTimestamp) {
+        throw new Error("Date Error: You must select a future date and time for the event.");
+      }
+      
       // Prompt MetaMask for gas and tx signing
-      const tx = await contract.createEvent(formData.title, totalSupply, basePriceWei, 500);
+      const tx = await contract.createEvent(formData.title, totalSupply, basePriceWei, 500, eventTimestamp);
       const receipt = await tx.wait(); // Wait for actual blockchain confirmation
       
       // Extract EventID from receipt logs
@@ -147,7 +157,11 @@ export const ManageEvents: React.FC = () => {
       setTiers([{ name: 'General', price: '', supply: '100' }]);
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
-      alert(err.message || "Failed to create event on the blockchain.");
+      if (err.message?.includes("missing revert data") || err.code === "CALL_EXCEPTION") {
+        alert("CRITICAL ERROR: Your frontend is trying to call the newly updated contract functions (like royaltyBps and eventDate), but the contract deployed at the address in your .env file is an OLD VERSION that doesn't have these features. \n\nFIX: You must run 'npx hardhat run scripts/deploy.js --network sepolia' and update your .env file with the NEW address!");
+      } else {
+        alert(err.message || "Failed to create event on the blockchain.");
+      }
     } finally {
       setIsMining(false);
     }
@@ -161,6 +175,32 @@ export const ManageEvents: React.FC = () => {
   const itemVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0 }
+  };
+
+  const handleCancelEvent = async (eventIdString: string) => {
+    try {
+      if (!(window as any).ethereum) throw new Error("MetaMask not found");
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(config.contractAddress, ABI, signer);
+
+      // Parse the ID correctly (strip "evt_" prefix if exists)
+      const numericId = parseInt(eventIdString.replace("evt_", ""));
+      if (isNaN(numericId)) throw new Error("Invalid event ID format");
+
+      const tx = await contract.cancelEvent(numericId);
+      await tx.wait();
+
+      markEventCancelled(eventIdString);
+      alert("Event successfully cancelled on blockchain.");
+    } catch (err: any) {
+      console.error(err);
+      if (err.message?.includes("missing revert data") || err.code === "CALL_EXCEPTION") {
+        alert("CRITICAL ERROR: Contract version mismatch. You are interacting with an old deployment of the smart contract that does not support the latest parameters. Please deploy the updated contract and update your .env file address.");
+      } else {
+        alert(err.message || "Failed to cancel event");
+      }
+    }
   };
 
   const isConfigMissing = !config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000";
@@ -471,6 +511,27 @@ export const ManageEvents: React.FC = () => {
                           </div>
                         </div>
                       </div>
+                      
+                      {/* Cancellation Action */}
+                      <div className="mt-4 pt-4 border-t border-white/5 flex gap-4 items-center">
+                        {event.cancelled ? (
+                          <div className="flex-1 py-3 px-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                            <span className="text-red-400 text-xs font-black tracking-widest uppercase italic">X Canceled on Blockchain</span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (confirm("Are you sure you want to permanently cancel this event? Buyers will be eligible for full refunds.")) {
+                                handleCancelEvent(event.id);
+                              }
+                            }}
+                            className="flex-1 py-3 px-4 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-all font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2"
+                          >
+                            <Trash2 size={14} /> Cancel Event
+                          </button>
+                        )}
+                      </div>
+                      
                     </div>
                   </div>
                 ))}
