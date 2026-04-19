@@ -35,25 +35,14 @@ interface TicketState {
   fetchTicketsFromChain: (userAddress?: string) => Promise<void>;
 }
 
-function generateHex(length: number): string {
-  const chars = '0123456789abcdef';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return result;
-}
-
 export const useTicketStore = create<TicketState>((set) => ({
   tickets: [],
   
   buyTicket: (eventId, ownerId, tierName, tierPrice) => {
-    const tokenId = `0x${generateHex(40)}`;
-    const txHash = `0x${generateHex(64)}`;
     const newTicket: Ticket = {
       id: `tkt_${Date.now()}`,
-      tokenId,
-      txHash,
+      tokenId: '', // Filled by fetch after minting
+      txHash: '',
       eventId,
       ownerId,
       tierName,
@@ -137,13 +126,13 @@ export const useTicketStore = create<TicketState>((set) => ({
             loadedTickets.push({
               id: `tkt_${i}`,
               tokenId: i.toString(),
-              txHash: '0x...', // Mocked as we don't store tx hash on chain currently
+              txHash: '', // Metadata not on chain
               eventId: `evt_${eventId}`,
-              ownerId: owner, // Map owner directly
+              ownerId: owner, 
               tierName: 'General Access',
               tierPrice: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
               status: isResale ? 'resale' : 'active',
-              purchasedAt: new Date().toISOString(), // Mocked metadata
+              purchasedAt: new Date().toISOString(), // Keeping current for now as it's not on chain
               resalePrice: isResale ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined,
             });
           }

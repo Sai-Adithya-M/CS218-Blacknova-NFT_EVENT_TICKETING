@@ -103,7 +103,7 @@ export const Dashboard: React.FC = () => {
         </div>
         <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/5 border border-[var(--border-glass)]">
           <div className="w-2 h-2 rounded-full bg-[var(--status-success)] animate-pulse" />
-          <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Network: Ethereum Mainnet</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Network: Ethereum Sepolia</span>
         </div>
       </motion.div>
 

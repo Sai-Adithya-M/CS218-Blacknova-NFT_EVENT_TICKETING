@@ -32,8 +32,8 @@ export const BrowseEvents: React.FC = () => {
     >
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
-          <h1 className="text-4xl font-black tracking-tight mb-2 italic">MARKETPLACE</h1>
-          <p className="text-[var(--text-secondary)] max-w-lg font-medium">
+          <h1 className="text-6xl font-black tracking-tighter mb-2 italic text-white">MARKETPLACE</h1>
+          <p className="text-white/60 max-w-lg font-medium">
             Discover and trade digital collectible tickets for the world's most exclusive experiences.
           </p>
         </div>

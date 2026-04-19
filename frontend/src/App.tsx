@@ -58,17 +58,10 @@ function AppContent() {
       (window as any).ethereum.on('accountsChanged', (accounts: string[]) => {
         if (accounts.length === 0) {
           useAuthStore.getState().logout();
-(window as any).ethereum.on('accountsChanged', (accounts: string[]) => {
-  if (accounts.length === 0) {
-    useAuthStore.getState().logout();
-  } else if (
-    useAuthStore.getState().user?.walletAddress &&
-    accounts[0].toLowerCase() !== useAuthStore.getState().user?.walletAddress?.toLowerCase()
-  ) {
-    useAuthStore.getState().logout();
-  }
-  window.location.reload();
-});
+        } else if (
+          useAuthStore.getState().user?.walletAddress &&
+          accounts[0].toLowerCase() !== useAuthStore.getState().user?.walletAddress?.toLowerCase()
+        ) {
           useAuthStore.getState().logout();
         }
         window.location.reload();

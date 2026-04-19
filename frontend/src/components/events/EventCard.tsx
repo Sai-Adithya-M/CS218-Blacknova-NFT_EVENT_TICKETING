@@ -112,15 +112,15 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
 
           <div className="flex items-center justify-between pt-4 border-t border-white/10">
             <div className="flex flex-col">
-              <span className="text-[10px] text-[var(--text-secondary)] font-black uppercase tracking-tighter">From</span>
-              <span className="text-lg font-black text-[var(--accent-teal)] tracking-tight">{lowestPrice} ETH</span>
+              <span className="text-[10px] text-[var(--accent-teal)] font-black uppercase tracking-tighter">From</span>
+              <span className="text-xl font-black text-white tracking-tight">{lowestPrice} ETH</span>
             </div>
             <div className="flex flex-col items-end">
-              <span className="text-[9px] text-white/30 font-bold">{totalSold}/{totalSupply} sold</span>
+              <span className="text-[9px] text-white/30 font-bold mb-1">{totalSold}/{totalSupply} sold</span>
               <motion.span 
-                whileHover={{ scale: 1.05 }}
+                whileHover={{ scale: 1.05, backgroundColor: 'var(--accent-purple)' }}
                 whileTap={{ scale: 0.95 }}
-                className="px-6 py-2.5 rounded-xl bg-[var(--accent-purple)] text-white text-xs font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
+                className="px-6 py-2 rounded-xl bg-[var(--accent-purple)]/80 backdrop-blur-md border border-[var(--accent-purple)]/30 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
               >
                 View
               </motion.span>

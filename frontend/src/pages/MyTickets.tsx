@@ -17,13 +17,16 @@ export const MyTickets: React.FC = () => {
   const { tickets, listForResale, cancelResale } = useTicketStore();
   const { events } = useEventStore();
   const { user } = useAuthStore();
+  
+  const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
+  const [activeResaleId, setActiveResaleId] = React.useState<string | null>(null);
 
   if (!user) return <AuthFallback />;
 
   const myTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
 
   const handleResale = async (ticket: any) => {
-    const priceStr = prompt("Enter resale price (ETH):");
+    const priceStr = resaleInputs[ticket.id];
     if (!priceStr) return;
     
     const price = parseFloat(priceStr);
@@ -42,6 +45,12 @@ export const MyTickets: React.FC = () => {
       await tx.wait();
 
       listForResale(ticket.id, price);
+      setActiveResaleId(null);
+      setResaleInputs(prev => {
+        const next = { ...prev };
+        delete next[ticket.id];
+        return next;
+      });
       alert("Ticket listed for resale on-chain!");
     } catch (err: any) {
       console.error("Resale listing failed:", err);
@@ -175,33 +184,61 @@ export const MyTickets: React.FC = () => {
                     {ticket.tierPrice} ETH
                   </p>
 
-                  <div className="flex items-center gap-2">
-                    {/* Etherscan link */}
-                    <a
-                      href={`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
-                    >
-                      <ExternalLink size={12} /> Etherscan
-                    </a>
+                  <div className="flex flex-col gap-2">
+                    {activeResaleId === ticket.id ? (
+                      <div className="flex items-center gap-2 p-2 rounded-2xl bg-white/5 border border-white/10 animate-in fade-in slide-in-from-right-4 duration-300">
+                        <input 
+                          type="number" 
+                          step="0.001" 
+                          min="0"
+                          placeholder="Price (ETH)"
+                          className="w-24 bg-transparent outline-none text-xs font-black text-[var(--accent-teal)] placeholder:text-white/20 px-2"
+                          value={resaleInputs[ticket.id] || ''}
+                          onChange={(e) => setResaleInputs({ ...resaleInputs, [ticket.id]: e.target.value })}
+                        />
+                        <button 
+                          onClick={() => handleResale(ticket)}
+                          className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)] text-black text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all"
+                        >
+                          List
+                        </button>
+                        <button 
+                          onClick={() => setActiveResaleId(null)}
+                          className="p-1.5 rounded-xl hover:bg-white/5 text-white/30"
+                        >
+                          <Ban size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {/* Etherscan link */}
+                        <a
+                          href={`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
+                        >
+                          <ExternalLink size={12} /> Etherscan
+                        </a>
 
-                    {ticket.status === 'active' && (
-                      <button 
-                        onClick={() => handleResale(ticket)}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-panel border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all italic"
-                      >
-                        <Share2 size={12} /> Resell
-                      </button>
-                    )}
+                        {ticket.status === 'active' && (
+                          <button 
+                            onClick={() => setActiveResaleId(ticket.id)}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-panel border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all italic"
+                          >
+                            <Share2 size={12} /> Resell
+                          </button>
+                        )}
 
-                    {ticket.status === 'resale' && (
-                      <button 
-                        onClick={() => handleCancelResale(ticket)}
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic"
-                      >
-                        <Ban size={12} /> Cancel
-                      </button>
+                        {ticket.status === 'resale' && (
+                          <button 
+                            onClick={() => handleCancelResale(ticket)}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic"
+                          >
+                            <Ban size={12} /> Cancel
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

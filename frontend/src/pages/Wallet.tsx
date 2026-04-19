@@ -78,7 +78,7 @@ export const Wallet: React.FC = () => {
         </div>
         <div className="hidden sm:flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/5 border border-white/10">
           <div className="w-2 h-2 rounded-full bg-[var(--status-success)] animate-pulse" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)] italic">Connected: Ethereum Mainnet</span>
+          <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)] italic">Connected: Ethereum Sepolia</span>
         </div>
       </motion.div>
 

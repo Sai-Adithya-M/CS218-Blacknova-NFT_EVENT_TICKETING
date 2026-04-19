@@ -104,10 +104,10 @@ export const useEventStore = create<EventState>((set) => ({
             loadedEvents.push({
               id: `evt_${eventId.toString()}`,
               title: evt.name || evt[0],
-              description: 'Loaded from Blockchain',
-              date: new Date().toISOString(),
-              location: 'Decentralized',
-              category: 'Music & Concerts',
+              description: '', // Removed fake data
+              date: new Date().toISOString(), // Metadata not stored on-chain, keeping current for now but ideally should be fetched from IPFS
+              location: '', 
+              category: '',
               organizerId: evt.organiser || evt[4],
               status: 'active',
               tiers: [

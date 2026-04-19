@@ -135,10 +135,7 @@ export const Home: React.FC = () => {
                 <span
                   className="inline-block py-2 italic font-black"
                   style={{
-                    background: 'linear-gradient(to right, var(--accent-purple), #d8b4fe, var(--accent-teal))',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    color: 'transparent'
+                    color: '#8c3bfe'
                   }}
                 >
                   for Real-World Events.
@@ -224,7 +221,7 @@ export const Home: React.FC = () => {
         >
           {Array.from({ length: 3 }).map((_, i) => (
             <React.Fragment key={i}>
-              {['Neon Nights 2026', 'CryptoCon Summit', 'Digital Art Week', 'Metaverse Gala', 'Blockchain Summit', 'Global Rave 2026'].map(e => (
+              {['SECURE ON-CHAIN', 'TRUE OWNERSHIP', 'NO SCALPERS', 'DECENTRALIZED TICKETING'].map(e => (
                 <span key={e} className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-white/30">
                   <span className="text-[var(--accent-purple)] text-xs">✦</span> {e}
                 </span>
@@ -241,7 +238,7 @@ export const Home: React.FC = () => {
         >
           <div className="text-center mb-20">
             <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">The Process</p>
-            <h2 className="text-5xl font-black uppercase tracking-tighter italic">How It Works</h2>
+            <h2 className="text-5xl font-black uppercase tracking-tighter italic text-white">How It Works</h2>
             <p className="text-white/50 mt-4 max-w-md mx-auto text-sm font-medium">From wallet connect to event entry — three seamless on-chain steps.</p>
           </div>
 
