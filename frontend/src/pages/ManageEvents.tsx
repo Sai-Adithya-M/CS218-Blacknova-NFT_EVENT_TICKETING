@@ -437,7 +437,12 @@ export const ManageEvents: React.FC = () => {
                           href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
                           className="flex items-center gap-1.5 text-[9px] font-bold text-white/40 hover:text-white transition-all uppercase tracking-widest"
                         >
-                          View in Etherscan
+} else if (
+  useAuthStore.getState().user?.walletAddress &&
+  accounts[0].toLowerCase() !== useAuthStore.getState().user?.walletAddress?.toLowerCase()
+) {
+  useAuthStore.getState().logout();
+}
                         </a>
                       </div>
 
