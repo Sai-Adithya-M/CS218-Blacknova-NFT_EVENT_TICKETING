@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, ExternalLink, Copy, Hash, ShieldCheck } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion } from 'framer-motion';
@@ -437,7 +437,12 @@ export const ManageEvents: React.FC = () => {
                           href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
                           className="flex items-center gap-1.5 text-[9px] font-bold text-white/40 hover:text-white transition-all uppercase tracking-widest"
                         >
-                          View in Etherscan <ExternalLink size={10} />
+} else if (
+  useAuthStore.getState().user?.walletAddress &&
+  accounts[0].toLowerCase() !== useAuthStore.getState().user?.walletAddress?.toLowerCase()
+) {
+  useAuthStore.getState().logout();
+}
                         </a>
                       </div>
 
