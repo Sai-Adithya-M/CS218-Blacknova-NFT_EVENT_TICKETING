@@ -43,9 +43,9 @@ export const Dashboard: React.FC = () => {
   const userTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
   const userEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
 
-  const marketVolume = events.reduce((acc, event) => 
+  const marketVolume = events.reduce((acc, event) =>
     acc + event.tiers.reduce((tierAcc, tier) => tierAcc + (tier.price * tier.sold), 0)
-  , 0);
+    , 0);
 
   const [networkSpeed, setNetworkSpeed] = useState<number>(0);
 
@@ -82,15 +82,15 @@ export const Dashboard: React.FC = () => {
 
   const itemVariants = {
     hidden: { opacity: 0, y: 20 },
-    visible: { 
-      opacity: 1, 
+    visible: {
+      opacity: 1,
       y: 0,
       transition: { duration: 0.5, ease: [0.23, 1, 0.32, 1] }
     }
   };
 
   return (
-    <motion.div 
+    <motion.div
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -115,8 +115,8 @@ export const Dashboard: React.FC = () => {
           { label: 'Market Volume', value: marketVolume, icon: TrendingUp, color: 'text-white', trend: marketVolume > 0 ? '+Active' : 'Neutral', isUp: marketVolume > 0, suffix: ' ETH' },
           { label: 'Network Speed', value: networkSpeed || '--', icon: Zap, iconColor: 'text-yellow-400', trend: 'Live Ping', isUp: true, suffix: 'ms' }
         ].map((stat, i) => (
-          <motion.div 
-            key={i} 
+          <motion.div
+            key={i}
             variants={itemVariants}
             whileHover={{ y: -5, transition: { duration: 0.2 } }}
             className="glass-panel p-8 rounded-[2rem] border border-[var(--border-glass)] relative overflow-hidden group hover:border-[var(--accent-purple)]/30 transition-all shadow-xl hover:shadow-[var(--accent-purple)]/5"
@@ -158,15 +158,15 @@ export const Dashboard: React.FC = () => {
                 ))}
               </div>
             </div>
-            
+
             <div className="flex items-end justify-between h-48 gap-2 px-4">
               {[40, 70, 45, 90, 65, 80, 50, 85, 60, 95, 75, 100].map((h, i) => (
                 <div key={i} className="flex-1 group relative">
-                  <motion.div 
+                  <motion.div
                     initial={{ height: 0 }}
                     animate={{ height: `${h}%` }}
                     transition={{ duration: 1, delay: 0.5 + i * 0.05, ease: "easeOut" }}
-                    className={`w-full rounded-t-lg bg-gradient-to-t ${i % 2 === 0 ? 'from-[var(--accent-purple)]/20 to-[var(--accent-purple)]' : 'from-[var(--accent-teal)]/20 to-[var(--accent-teal)]'} opacity-40 group-hover:opacity-100 transition-all cursor-pointer`} 
+                    className={`w-full rounded-t-lg bg-gradient-to-t ${i % 2 === 0 ? 'from-[var(--accent-purple)]/20 to-[var(--accent-purple)]' : 'from-[var(--accent-teal)]/20 to-[var(--accent-teal)]'} opacity-40 group-hover:opacity-100 transition-all cursor-pointer`}
                   />
                   <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-black text-[10px] font-black px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     {h} ETH
@@ -189,8 +189,8 @@ export const Dashboard: React.FC = () => {
                 {(user.role === 'buyer' ? userTickets : userEvents).slice(0, 4).map((item) => {
                   const date = new Date(item.date);
                   return (
-                    <motion.div 
-                      key={item.id} 
+                    <motion.div
+                      key={item.id}
                       variants={itemVariants}
                       className="flex items-center gap-4 group"
                     >

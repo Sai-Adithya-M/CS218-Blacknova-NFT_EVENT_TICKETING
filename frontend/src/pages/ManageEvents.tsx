@@ -21,10 +21,11 @@ interface TierFormData {
 }
 
 export const ManageEvents: React.FC = () => {
-  const { events, createEvent } = useEventStore();
+  const { events, isLoading, createEvent } = useEventStore();
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
+  const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
 
   const [formData, setFormData] = useState({
     title: '',
@@ -32,6 +33,7 @@ export const ManageEvents: React.FC = () => {
     date: '',
     location: '',
     category: 'Music & Concerts',
+    royalty: '5', // Default 5%
   });
 
   const [tiers, setTiers] = useState<TierFormData[]>([
@@ -40,8 +42,6 @@ export const ManageEvents: React.FC = () => {
   const [manualAddress, setManualAddress] = useState('');
 
   if (!user) return <AuthFallback />;
-
-  const myEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
 
   const addTier = () => {
     setTiers([...tiers, { name: '', price: '', supply: '50' }]);
@@ -85,38 +85,28 @@ export const ManageEvents: React.FC = () => {
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(config.sepoliaChainId)) {
         try {
-          // Request MetaMask to switch to Sepolia
           await (window as any).ethereum.request({
             method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0xaa36a7' }], // 11155111 in hex
+            params: [{ chainId: '0xaa36a7' }], 
           });
         } catch (switchError) {
           throw new Error("Please switch your MetaMask network to Sepolia to continue.");
         }
       }
 
-      if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-        throw new Error("Cannot send transaction to Burn Address (0x0...0). Please update VITE_CONTRACT_ADDRESS in your .env file with your deployed contract address and restart the dev server.");
-      }
-
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
-
-      // PACKING METADATA: Pack title, location, date, and description into the existing 'name' field.
-      // Use ||| as a unique delimiter that is unlikely to appear in a name.
       const packedMetadata = `${formData.title}|||${formData.location}|||${formData.date}|||${formData.description}|||${formData.category}`;
+      const royaltyBps = Math.floor(parseFloat(formData.royalty || '0') * 100);
 
-      // Prompt MetaMask for gas and tx signing
-      const tx = await contract.createEvent(packedMetadata, totalSupply, basePriceWei, 500);
-      const receipt = await tx.wait(); // Wait for actual blockchain confirmation
+      const tx = await contract.createEvent(packedMetadata, totalSupply, basePriceWei, royaltyBps);
+      const receipt = await tx.wait();
 
-      // Extract EventID from receipt logs
-      let blockchainEventId = `evt_${Date.now()}`; // Fallback
+      let blockchainEventId = `evt_${Date.now()}`; 
       if (receipt && receipt.logs) {
         try {
-          // Find the EventCreated log
           const eventCreatedLog = receipt.logs.find((log: any) => {
             try {
               const parsed = contract.interface.parseLog(log);
@@ -128,11 +118,10 @@ export const ManageEvents: React.FC = () => {
             const parsedLog = contract.interface.parseLog(eventCreatedLog);
             if (parsedLog && parsedLog.args && parsedLog.args.eventId) {
               blockchainEventId = parsedLog.args.eventId.toString();
-              console.log("Captured Blockchain Event ID:", blockchainEventId);
             }
           }
         } catch (err) {
-          console.warn("Failed to parse eventId from log, using fallback", err);
+          console.warn("Failed to parse eventId from log", err);
         }
       }
 
@@ -144,15 +133,16 @@ export const ManageEvents: React.FC = () => {
         location: formData.location,
         category: formData.category,
         organizerId: user.id,
+        royaltyBps: royaltyBps,
         tiers: parsedTiers,
       });
 
       setIsCreating(false);
-      setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts' });
+      setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts', royalty: '5' });
       setTiers([{ name: 'General', price: '', supply: '100' }]);
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
-      alert(err.message || "Failed to create event on the blockchain.");
+      alert(err.message || "Failed to create event.");
     } finally {
       setIsMining(false);
     }
@@ -177,7 +167,6 @@ export const ManageEvents: React.FC = () => {
       variants={containerVariants}
       className="px-12 pt-32 pb-12"
     >
-      {/* Configuration Guard UI */}
       {isConfigMissing && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -191,12 +180,12 @@ export const ManageEvents: React.FC = () => {
             <div className="flex-1 text-center md:text-left">
               <h3 className="text-lg font-black uppercase italic tracking-tight text-red-400 mb-1">Contract Not Connected</h3>
               <p className="text-sm text-white/60 font-medium leading-relaxed">
-                You haven't set your deployed contract address yet. This is why you are seeing the "Burn Address" error.
+                Update VITE_CONTRACT_ADDRESS in your .env file.
               </p>
             </div>
             <div className="flex flex-col gap-2 min-w-[300px]">
               <div className="p-3 rounded-xl bg-black/40 border border-white/10">
-                <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-2">Manual Connection (Paste Address):</p>
+                <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-2">Manual Connection:</p>
                 <div className="flex gap-2">
                   <input
                     value={manualAddress}
@@ -205,24 +194,12 @@ export const ManageEvents: React.FC = () => {
                     className="flex-1 bg-white/5 border border-white/10 rounded-lg py-1.5 px-3 text-[10px] font-mono text-white focus:border-[var(--accent-teal)] outline-none"
                   />
                   <button
-                    onClick={() => {
-                      if (manualAddress.length === 42) {
-                        alert(`Please paste this address in our chat! I will then automatically update your /frontend/.env file for you.\n\nAddress: ${manualAddress}`);
-                      } else {
-                        alert("Invalid address format.");
-                      }
-                    }}
+                    onClick={() => alert(`Connect Address: ${manualAddress}`)}
                     className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[8px] font-black uppercase"
                   >
                     Connect
                   </button>
                 </div>
-              </div>
-              <div className="p-3 rounded-xl bg-black/40 border border-white/10">
-                <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-2">Run this in root terminal:</p>
-                <code className="text-[10px] font-mono font-bold text-[var(--accent-teal)] block break-all">
-                  npx hardhat run scripts/deploy.js --network sepolia
-                </code>
               </div>
             </div>
           </div>
@@ -246,10 +223,8 @@ export const ManageEvents: React.FC = () => {
       {isCreating ? (
         <motion.div variants={itemVariants} className="max-w-[1100px] mx-auto">
           <div className="grid lg:grid-cols-[1fr_380px] gap-12 items-start">
-            {/* LEFT COLUMN: FORM */}
             <div className="glass-panel p-8 rounded-3xl border border-white/10 backdrop-blur-xl bg-white/[0.03]">
               <form onSubmit={handleSubmit} className="space-y-8">
-                {/* 1. Basic Info */}
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">1. Basic Info</h3>
                   <input
@@ -269,7 +244,6 @@ export const ManageEvents: React.FC = () => {
                   />
                 </section>
 
-                {/* 2. Event Details */}
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">2. Event Details</h3>
                   <div className="grid md:grid-cols-2 gap-4">
@@ -299,9 +273,26 @@ export const ManageEvents: React.FC = () => {
                     <option value="Sports & Gaming">Sports & Gaming</option>
                     <option value="Conference">Conference</option>
                   </select>
+
+                  <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="flex-1">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic mb-1">Secondary Market Royalty (%)</h4>
+                      <p className="text-[9px] text-white/30 font-medium">Earn a percentage of every future resale of your tickets.</p>
+                    </div>
+                    <div className="w-24 relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        className="w-full bg-white/5 border border-white/10 rounded-lg py-2 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-bold text-white text-center"
+                        value={formData.royalty}
+                        onChange={e => setFormData({ ...formData, royalty: e.target.value })}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/20">%</span>
+                    </div>
+                  </div>
                 </section>
 
-                {/* 3. Ticket Tiers */}
                 <section className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic flex items-center gap-2">
@@ -310,7 +301,7 @@ export const ManageEvents: React.FC = () => {
                     <button
                       type="button"
                       onClick={addTier}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all font-bold"
                     >
                       <Plus size={12} /> Add Tier
                     </button>
@@ -364,12 +355,11 @@ export const ManageEvents: React.FC = () => {
                   </div>
                 </section>
 
-                {/* 4. Media */}
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Media Upload</h3>
                   <div className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all">
                     <Upload className="text-white/20" size={18} />
-                    <span className="text-xs font-bold text-white/30 uppercase tracking-widest">Banner Image (Optional)</span>
+                    <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image (Optional)</span>
                   </div>
                 </section>
 
@@ -383,12 +373,11 @@ export const ManageEvents: React.FC = () => {
               </form>
             </div>
 
-            {/* RIGHT COLUMN: INFO PANEL */}
             <div className="space-y-6">
               <div className="glass-panel p-8 rounded-3xl border border-white/10 bg-white/[0.03]">
                 <h3 className="text-lg font-black uppercase italic tracking-tight mb-4">Launch on Web3</h3>
                 <p className="text-sm text-white/50 font-medium leading-relaxed mb-6">
-                  Your event tickets will be minted as ERC-721 NFTs on Sepolia testnet. Each ticket is unique, verifiable, and tradeable.
+                  ERC-721 NFTs on Sepolia testnet.
                 </p>
                 <div className="space-y-3">
                   {[
@@ -404,34 +393,59 @@ export const ManageEvents: React.FC = () => {
                   ))}
                 </div>
               </div>
-
-              {/* Tier Preview */}
-              {tiers.some(t => t.name && t.price) && (
-                <div className="glass-panel p-6 rounded-3xl border border-white/10 bg-white/[0.03]">
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] mb-4 italic">Tier Preview</h4>
-                  <div className="space-y-2">
-                    {tiers.filter(t => t.name && t.price).map((tier, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-                        <span className="font-bold text-sm">{tier.name}</span>
-                        <span className="font-black text-[var(--accent-teal)]">{tier.price} ETH</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </motion.div>
       ) : (
         <div className="space-y-12">
+          <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-center gap-6 mb-8">
+            <div className="flex p-1.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl">
+              <button
+                onClick={() => setManageTab('active')}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  manageTab === 'active' 
+                    ? 'bg-white text-black shadow-2xl' 
+                    : 'text-white/40 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                Active Events
+              </button>
+              <button
+                onClick={() => setManageTab('history')}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  manageTab === 'history' 
+                    ? 'bg-white text-black shadow-2xl' 
+                    : 'text-white/40 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                Past History
+              </button>
+            </div>
+          </motion.div>
+
           <motion.div variants={itemVariants}>
-            {myEvents.length > 0 ? (
+            {isLoading ? (
+              <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-white/5 bg-white/[0.02]">
+                <div className="w-10 h-10 border-4 border-[var(--accent-teal)]/20 border-t-[var(--accent-teal)] rounded-full animate-spin mb-4" />
+                <p className="text-[9px] font-black uppercase tracking-[0.4em] text-[var(--accent-teal)] italic animate-pulse">Scanning On-Chain Records...</p>
+              </div>
+            ) : events
+              .filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase())
+              .filter(event => {
+                const isPast = new Date(event.date) < new Date();
+                return manageTab === 'active' ? !isPast : isPast;
+              })
+              .length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {myEvents.map(event => (
+                {events
+                  .filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase())
+                  .filter(event => {
+                    const isPast = new Date(event.date) < new Date();
+                    return manageTab === 'active' ? !isPast : isPast;
+                  })
+                  .map(event => (
                   <div key={event.id} className="space-y-4">
                     <EventCard event={event} showEtherscan={true} />
-
-                    {/* Organiser Technical Info */}
                     <div className="glass-panel p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic">
@@ -439,29 +453,27 @@ export const ManageEvents: React.FC = () => {
                           On-Chain Metadata
                         </div>
                       </div>
-
                       <div className="grid grid-cols-2 gap-4">
                         <div className="p-3 rounded-xl bg-black/40 border border-white/5">
                           <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                            <Hash size={8} /> On-Chain Event ID
+                            <Hash size={8} /> Event ID
                           </p>
                           <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
                         </div>
-
                         <div className="p-3 rounded-xl bg-black/40 border border-white/5">
                           <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
                             <ShieldCheck size={8} /> Contract
                           </p>
                           <div className="flex items-center justify-between">
                             <code className="text-[10px] font-mono font-bold text-white/60">
-                              {config.contractAddress.slice(0, 6)}...{config.contractAddress.slice(-4)}
+                              {config.contractAddress.slice(0, 6)}...
                             </code>
                             <button
                               onClick={() => {
                                 navigator.clipboard.writeText(config.contractAddress);
-                                alert("Contract address copied!");
+                                alert("Copied!");
                               }}
-                              className="p-1 rounded bg-white/5 hover:bg-white/10 text-white/30"
+                              className="p-1 rounded bg-white/5 text-white/30"
                             >
                               <Copy size={10} />
                             </button>
@@ -475,8 +487,14 @@ export const ManageEvents: React.FC = () => {
             ) : (
               <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-dashed border-white/10 text-center p-8">
                 <LayoutDashboard size={48} className="mb-4 text-white/10" />
-                <p className="text-lg font-black uppercase italic tracking-widest text-white/30 mb-2">No Events Yet</p>
-                <p className="text-sm text-white/20">Click "Create New Event" to launch your first experience.</p>
+                <p className="text-lg font-black uppercase italic tracking-widest text-white/30 mb-2">
+                  {manageTab === 'active' ? 'No Active Events' : 'No Past Events'}
+                </p>
+                <p className="text-sm text-white/20">
+                  {manageTab === 'active' 
+                    ? 'Click "Create New Event" to launch your first experience.' 
+                    : 'Your concluded events will show up here as historical records.'}
+                </p>
               </div>
             )}
           </motion.div>

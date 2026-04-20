@@ -225,6 +225,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                       <span className="flex items-center gap-1.5"><Calendar size={12} className="text-[var(--accent-purple)]" />{date.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</span>
                       <span className="flex items-center gap-1.5"><MapPin size={12} className="text-[var(--accent-teal)]" />{event.location}</span>
                       <span className="flex items-center gap-1.5"><Tag size={12} />{event.category}</span>
+                      <span className="flex items-center gap-1.5 text-[var(--accent-teal)]"><ShieldCheck size={12} />{(event.royaltyBps / 100).toFixed(1)}% Royalty</span>
                     </div>
 
                     <p className="text-sm text-white/60 leading-relaxed">{event.description}</p>
