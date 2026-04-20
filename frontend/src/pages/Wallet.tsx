@@ -8,28 +8,42 @@ import { AuthFallback } from '../components/ui/AuthFallback';
 import { ethers } from 'ethers';
 
 export const Wallet: React.FC = () => {
-  const { user } = useAuthStore();
+  const { user, setBalance } = useAuthStore();
   const { tickets } = useTicketStore();
   const { events } = useEventStore();
   const [gasEstimate, setGasEstimate] = useState<string>('--');
+  const [realBalance, setRealBalance] = useState<number>(user?.walletBalance || 0);
 
   useEffect(() => {
     let mounted = true;
-    const fetchGas = async () => {
+    const fetchBlockchainData = async () => {
       try {
-        if ((window as any).ethereum) {
+        if ((window as any).ethereum && user?.walletAddress) {
           const provider = new ethers.BrowserProvider((window as any).ethereum);
+          
+          // Fetch Gas
           const feeData = await provider.getFeeData();
           if (feeData.gasPrice && mounted) {
             setGasEstimate(ethers.formatUnits(feeData.gasPrice, 'gwei').split('.')[0]);
           }
+
+          // Fetch real balance
+          const balanceWei = await provider.getBalance(user.walletAddress);
+          const balanceEth = parseFloat(ethers.formatEther(balanceWei));
+          if (mounted) {
+            setRealBalance(balanceEth);
+            setBalance(balanceEth); // Sync with store
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("Wallet fetch error:", e);
+      }
     };
-    fetchGas();
-    const interval = setInterval(fetchGas, 15000);
+
+    fetchBlockchainData();
+    const interval = setInterval(fetchBlockchainData, 10000); // More frequent updates
     return () => { mounted = false; clearInterval(interval); };
-  }, []);
+  }, [user?.walletAddress, setBalance]);
 
   if (!user) return <AuthFallback />;
 
@@ -39,18 +53,18 @@ export const Wallet: React.FC = () => {
   const transactions = user.role === 'buyer' 
     ? userTickets.map(t => ({
         id: t.id,
-        type: 'Purchase',
+        type: 'NFT Ticket Purchase',
         amount: `-${t.tierPrice.toFixed(4)} ETH`,
         date: new Date(t.purchasedAt).toLocaleDateString(),
-        status: 'SUCCESS',
+        status: 'CONFIRMED',
         isNegative: true,
       }))
     : userEvents.map(e => ({
         id: e.id,
-        type: 'Deploy Event',
+        type: 'Event Deployment',
         amount: '0.0000 ETH',
         date: new Date(e.date).toLocaleDateString(),
-        status: 'SUCCESS',
+        status: 'CONFIRMED',
         isNegative: true,
       }));
 
@@ -69,7 +83,7 @@ export const Wallet: React.FC = () => {
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="max-w-7xl mx-auto px-6 py-12"
+      className="px-12 pt-32 pb-12"
     >
       <motion.div variants={itemVariants} className="flex items-end justify-between mb-16">
         <div>
@@ -94,7 +108,7 @@ export const Wallet: React.FC = () => {
 
             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--text-secondary)] mb-4 italic">Total Available Balance</p>
             <h2 className="text-6xl font-black uppercase italic tracking-tighter mb-12">
-              {user.walletBalance.toFixed(4)} <span className="text-[var(--accent-teal)]">ETH</span>
+              {realBalance.toFixed(4)} <span className="text-[var(--accent-teal)]">ETH</span>
             </h2>
 
             <div className="grid gap-4">

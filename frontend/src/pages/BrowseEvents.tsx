@@ -24,11 +24,11 @@ export const BrowseEvents: React.FC = () => {
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="max-w-7xl mx-auto px-6 py-12"
+      className="px-12 pt-32 pb-12"
     >
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
@@ -37,7 +37,7 @@ export const BrowseEvents: React.FC = () => {
             Discover and trade digital collectible tickets for the world's most exclusive experiences.
           </p>
         </div>
-        
+
         <button className="lg:hidden flex items-center gap-2 px-6 py-3 rounded-2xl glass-panel border border-white/10 font-bold text-sm">
           <SlidersHorizontal size={18} />
           Filters
@@ -48,17 +48,17 @@ export const BrowseEvents: React.FC = () => {
         <motion.div variants={itemVariants} className="hidden lg:block">
           <FilterSidebar />
         </motion.div>
-        
+
         <div className="flex-1">
           {activeEvents.length > 0 ? (
-            <motion.div 
+            <motion.div
               variants={containerVariants}
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8"
             >
               {activeEvents.map((event, i) => (
-                <motion.div 
-                  key={event.id} 
-                  variants={itemVariants} 
+                <motion.div
+                  key={event.id}
+                  variants={itemVariants}
                   onClick={() => setSelectedEvent(event)}
                 >
                   <EventCard event={event} index={i} />
@@ -66,7 +66,7 @@ export const BrowseEvents: React.FC = () => {
               ))}
             </motion.div>
           ) : (
-            <motion.div 
+            <motion.div
               variants={itemVariants}
               className="h-96 flex flex-col items-center justify-center glass-panel rounded-[3rem] border border-dashed border-white/10 text-center p-12"
             >
@@ -81,7 +81,7 @@ export const BrowseEvents: React.FC = () => {
       </div>
 
       {/* Event Detail / Purchase Modal */}
-      <EventDetailModal 
+      <EventDetailModal
         event={selectedEvent}
         isOpen={!!selectedEvent}
         onClose={() => setSelectedEvent(null)}

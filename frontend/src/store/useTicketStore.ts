@@ -37,7 +37,7 @@ interface TicketState {
 
 export const useTicketStore = create<TicketState>((set) => ({
   tickets: [],
-  
+
   buyTicket: (eventId, ownerId, tierName, tierPrice) => {
     const newTicket: Ticket = {
       id: `tkt_${Date.now()}`,
@@ -59,19 +59,19 @@ export const useTicketStore = create<TicketState>((set) => ({
   },
 
   listForResale: (ticketId, price) => set((state) => ({
-    tickets: state.tickets.map(t => 
+    tickets: state.tickets.map(t =>
       t.id === ticketId ? { ...t, status: 'resale' as TicketStatus, resalePrice: price, resaleLink: `https://sepolia.etherscan.io/nft/${config.contractAddress}/${t.tokenId}` } : t
     )
   })),
 
   cancelResale: (ticketId) => set((state) => ({
-    tickets: state.tickets.map(t => 
+    tickets: state.tickets.map(t =>
       t.id === ticketId ? { ...t, status: 'active' as TicketStatus, resalePrice: undefined, resaleLink: undefined } : t
     )
   })),
-  
+
   buyResaleTicket: (ticketId, newOwnerId) => set((state) => ({
-    tickets: state.tickets.map(t => 
+    tickets: state.tickets.map(t =>
       t.id === ticketId ? { ...t, ownerId: newOwnerId, status: 'active' as TicketStatus, resalePrice: undefined, resaleLink: undefined } : t
     )
   })),
@@ -89,8 +89,8 @@ export const useTicketStore = create<TicketState>((set) => ({
         try {
           const network = await provider.getNetwork();
           if (network.chainId !== 11155111n && network.chainId !== 11155111) {
-             console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
-             provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+            console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
+            provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
           }
         } catch (networkErr) {
           console.error("Failed to fetch network", networkErr);
@@ -109,10 +109,10 @@ export const useTicketStore = create<TicketState>((set) => ({
           const listing = await contract.getResaleListing(i);
           let owner = '';
           try {
-             owner = await contract.ownerOf(i);
-          } catch(e) {
-             // Token not minted yet
-             continue;
+            owner = await contract.ownerOf(i);
+          } catch (e) {
+            // Token not minted yet
+            continue;
           }
 
           const isOwner = userAddress && owner.toLowerCase() === userAddress.toLowerCase();
@@ -128,7 +128,7 @@ export const useTicketStore = create<TicketState>((set) => ({
               tokenId: i.toString(),
               txHash: '', // Metadata not on chain
               eventId: `evt_${eventId}`,
-              ownerId: owner, 
+              ownerId: owner,
               tierName: 'General Access',
               tierPrice: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
               status: isResale ? 'resale' : 'active',

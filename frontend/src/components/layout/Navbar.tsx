@@ -66,7 +66,7 @@ export const Navbar: React.FC = () => {
           : 'bg-transparent border-b border-transparent py-4'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-6 flex justify-between items-center gap-8">
+      <div className="px-8 flex justify-between items-center gap-8">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2.5 group shrink-0">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">

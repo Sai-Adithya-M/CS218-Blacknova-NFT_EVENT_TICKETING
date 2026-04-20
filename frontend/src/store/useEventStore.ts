@@ -38,27 +38,27 @@ interface EventState {
 
 export const useEventStore = create<EventState>((set) => ({
   events: [],
-  
+
   createEvent: (eventData) => set((state) => ({
     events: [
-      ...state.events, 
-      { 
-        ...eventData, 
-        id: eventData.id || `evt_${Date.now()}`, 
-        status: 'active' 
+      ...state.events,
+      {
+        ...eventData,
+        id: eventData.id || `evt_${Date.now()}`,
+        status: 'active'
       }
     ]
   })),
 
   incrementTierSold: (eventId, tierId) => set((state) => ({
-    events: state.events.map(e => 
-      e.id === eventId 
-        ? { 
-            ...e, 
-            tiers: e.tiers.map(t => 
-              t.id === tierId ? { ...t, sold: t.sold + 1 } : t
-            ) 
-          } 
+    events: state.events.map(e =>
+      e.id === eventId
+        ? {
+          ...e,
+          tiers: e.tiers.map(t =>
+            t.id === tierId ? { ...t, sold: t.sold + 1 } : t
+          )
+        }
         : e
     )
   })),
@@ -76,8 +76,8 @@ export const useEventStore = create<EventState>((set) => ({
         try {
           const network = await provider.getNetwork();
           if (network.chainId !== 11155111n && network.chainId !== 11155111) {
-             console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
-             provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
+            console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
+            provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
           }
         } catch (networkErr) {
           console.error("Failed to fetch network", networkErr);
@@ -88,10 +88,10 @@ export const useEventStore = create<EventState>((set) => ({
       }
 
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
-      
+
       const filter = contract.filters.EventCreated();
       const eventLogs = await contract.queryFilter(filter, 0, "latest");
-      
+
       const loadedEvents: Event[] = [];
 
       for (const log of eventLogs) {
@@ -101,15 +101,29 @@ export const useEventStore = create<EventState>((set) => ({
 
           const evt = await contract.fetchEventData(eventId);
           if (evt.exists || evt[6]) { // Support both array index and object key
+            // UNPACKING METADATA
+            const rawName = evt.name || evt[0];
+            const nameParts = rawName.split('|||');
+
+            const title = nameParts[0] || rawName;
+            const location = nameParts[1] || '';
+            const date = nameParts[2] || new Date().toISOString();
+            const description = nameParts[3] || '';
+            const category = nameParts[4] || 'Music & Concerts';
+
+            // Automatic Expiration: If event date has passed, mark it as past
+            const eventDate = new Date(date);
+            const isExpired = eventDate < new Date();
+
             loadedEvents.push({
               id: `evt_${eventId.toString()}`,
-              title: evt.name || evt[0],
-              description: '', // Removed fake data
-              date: new Date().toISOString(), // Metadata not stored on-chain, keeping current for now but ideally should be fetched from IPFS
-              location: '', 
-              category: '',
+              title,
+              description,
+              date,
+              location,
+              category,
               organizerId: evt.organiser || evt[4],
-              status: 'active',
+              status: isExpired ? 'past' : 'active',
               tiers: [
                 {
                   id: `tier_evt_${eventId.toString()}`,

@@ -25,7 +25,7 @@ export const ManageEvents: React.FC = () => {
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -71,16 +71,16 @@ export const ManageEvents: React.FC = () => {
       }));
 
     if (parsedTiers.length === 0) return;
-    
+
     setIsMining(true);
     try {
       if (!(window as any).ethereum) throw new Error("MetaMask not found");
-      
+
       const totalSupply = parsedTiers.reduce((acc, t) => acc + t.supply, 0);
       const lowestPrice = Math.min(...parsedTiers.map(t => t.price));
-      
+
       const provider = new ethers.BrowserProvider((window as any).ethereum);
-      
+
       // Network Check: Ensure user is on Sepolia
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(config.sepoliaChainId)) {
@@ -103,10 +103,15 @@ export const ManageEvents: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
+
+      // PACKING METADATA: Pack title, location, date, and description into the existing 'name' field.
+      // Use ||| as a unique delimiter that is unlikely to appear in a name.
+      const packedMetadata = `${formData.title}|||${formData.location}|||${formData.date}|||${formData.description}|||${formData.category}`;
+
       // Prompt MetaMask for gas and tx signing
-      const tx = await contract.createEvent(formData.title, totalSupply, basePriceWei, 500);
+      const tx = await contract.createEvent(packedMetadata, totalSupply, basePriceWei, 500);
       const receipt = await tx.wait(); // Wait for actual blockchain confirmation
-      
+
       // Extract EventID from receipt logs
       let blockchainEventId = `evt_${Date.now()}`; // Fallback
       if (receipt && receipt.logs) {
@@ -130,7 +135,7 @@ export const ManageEvents: React.FC = () => {
           console.warn("Failed to parse eventId from log, using fallback", err);
         }
       }
-      
+
       createEvent({
         id: blockchainEventId,
         title: formData.title,
@@ -141,7 +146,7 @@ export const ManageEvents: React.FC = () => {
         organizerId: user.id,
         tiers: parsedTiers,
       });
-      
+
       setIsCreating(false);
       setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts' });
       setTiers([{ name: 'General', price: '', supply: '100' }]);
@@ -166,15 +171,15 @@ export const ManageEvents: React.FC = () => {
   const isConfigMissing = !config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000";
 
   return (
-    <motion.div 
+    <motion.div
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="max-w-7xl mx-auto px-6 py-12"
+      className="px-12 pt-32 pb-12"
     >
       {/* Configuration Guard UI */}
       {isConfigMissing && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-12 p-6 rounded-3xl border border-red-500/20 bg-red-500/5 backdrop-blur-xl"
@@ -193,13 +198,13 @@ export const ManageEvents: React.FC = () => {
               <div className="p-3 rounded-xl bg-black/40 border border-white/10">
                 <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-2">Manual Connection (Paste Address):</p>
                 <div className="flex gap-2">
-                  <input 
+                  <input
                     value={manualAddress}
                     onChange={(e) => setManualAddress(e.target.value)}
                     placeholder="0x..."
                     className="flex-1 bg-white/5 border border-white/10 rounded-lg py-1.5 px-3 text-[10px] font-mono text-white focus:border-[var(--accent-teal)] outline-none"
                   />
-                  <button 
+                  <button
                     onClick={() => {
                       if (manualAddress.length === 42) {
                         alert(`Please paste this address in our chat! I will then automatically update your /frontend/.env file for you.\n\nAddress: ${manualAddress}`);
@@ -225,11 +230,11 @@ export const ManageEvents: React.FC = () => {
       )}
 
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-12">
-        <div>
-          <h2 className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-purple)] mb-3 italic">Event Management</h2>
-          <h1 className="text-4xl font-black tracking-tight italic">CREATE EVENT</h1>
+        <div className="space-y-1">
+          <h2 className="text-xs font-black tracking-[0.5em] uppercase text-[var(--accent-purple)] mb-3 italic opacity-80">Event Management</h2>
+          <h1 className="text-6xl font-black tracking-tighter italic leading-none">CREATE EVENT</h1>
         </div>
-        <button 
+        <button
           className="px-8 py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-xs flex items-center gap-2 shadow-lg hover:shadow-white/20 transition-all"
           onClick={() => setIsCreating(!isCreating)}
         >
@@ -247,20 +252,20 @@ export const ManageEvents: React.FC = () => {
                 {/* 1. Basic Info */}
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">1. Basic Info</h3>
-                  <input 
-                    required 
+                  <input
+                    required
                     placeholder="Event Name"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-bold text-white placeholder:text-white/30" 
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-bold text-white placeholder:text-white/30"
                     value={formData.title}
-                    onChange={e => setFormData({...formData, title: e.target.value})}
+                    onChange={e => setFormData({ ...formData, title: e.target.value })}
                   />
-                  <textarea 
-                    required 
+                  <textarea
+                    required
                     rows={3}
                     placeholder="Describe your event..."
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white placeholder:text-white/30 leading-relaxed" 
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white placeholder:text-white/30 leading-relaxed"
                     value={formData.description}
-                    onChange={e => setFormData({...formData, description: e.target.value})}
+                    onChange={e => setFormData({ ...formData, description: e.target.value })}
                   />
                 </section>
 
@@ -268,25 +273,25 @@ export const ManageEvents: React.FC = () => {
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">2. Event Details</h3>
                   <div className="grid md:grid-cols-2 gap-4">
-                    <input 
-                      type="datetime-local" 
-                      required 
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white" 
+                    <input
+                      type="datetime-local"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white"
                       value={formData.date}
-                      onChange={e => setFormData({...formData, date: e.target.value})}
+                      onChange={e => setFormData({ ...formData, date: e.target.value })}
                     />
-                    <input 
-                      required 
+                    <input
+                      required
                       placeholder="Location"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white placeholder:text-white/30" 
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white placeholder:text-white/30"
                       value={formData.location}
-                      onChange={e => setFormData({...formData, location: e.target.value})}
+                      onChange={e => setFormData({ ...formData, location: e.target.value })}
                     />
                   </div>
-                  <select 
+                  <select
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white/70"
                     value={formData.category}
-                    onChange={e => setFormData({...formData, category: e.target.value})}
+                    onChange={e => setFormData({ ...formData, category: e.target.value })}
                   >
                     <option value="Music & Concerts">Music & Concerts</option>
                     <option value="Tech & Crypto">Tech & Crypto</option>
@@ -302,7 +307,7 @@ export const ManageEvents: React.FC = () => {
                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic flex items-center gap-2">
                       <Layers size={12} /> 3. Ticket Tiers
                     </h3>
-                    <button 
+                    <button
                       type="button"
                       onClick={addTier}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
@@ -317,7 +322,7 @@ export const ManageEvents: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <span className="text-[9px] font-black uppercase tracking-widest text-white/30">Tier {index + 1}</span>
                           {tiers.length > 1 && (
-                            <button 
+                            <button
                               type="button"
                               onClick={() => removeTier(index)}
                               className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all"
@@ -368,8 +373,8 @@ export const ManageEvents: React.FC = () => {
                   </div>
                 </section>
 
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isMining}
                   className="w-full py-4 rounded-xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:shadow-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -424,8 +429,8 @@ export const ManageEvents: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {myEvents.map(event => (
                   <div key={event.id} className="space-y-4">
-                    <EventCard event={event} />
-                    
+                    <EventCard event={event} showEtherscan={true} />
+
                     {/* Organiser Technical Info */}
                     <div className="glass-panel p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
                       <div className="flex items-center justify-between mb-4">
@@ -442,7 +447,7 @@ export const ManageEvents: React.FC = () => {
                           </p>
                           <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
                         </div>
-                        
+
                         <div className="p-3 rounded-xl bg-black/40 border border-white/5">
                           <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
                             <ShieldCheck size={8} /> Contract
@@ -451,7 +456,7 @@ export const ManageEvents: React.FC = () => {
                             <code className="text-[10px] font-mono font-bold text-white/60">
                               {config.contractAddress.slice(0, 6)}...{config.contractAddress.slice(-4)}
                             </code>
-                            <button 
+                            <button
                               onClick={() => {
                                 navigator.clipboard.writeText(config.contractAddress);
                                 alert("Contract address copied!");

@@ -2,14 +2,16 @@ import React from 'react';
 import { Calendar, MapPin, Sparkles } from 'lucide-react';
 import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import type { Event } from '../../store/useEventStore';
+import { config } from '../../config';
 
 interface EventCardProps {
   event: Event;
   variant?: 'small' | 'large';
   index?: number;
+  showEtherscan?: boolean;
 }
 
-export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', index = 0 }) => {
+export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', index = 0, showEtherscan = false }) => {
   const date = new Date(event.date);
   const lowestPrice = event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0;
   const totalSold = event.tiers?.reduce((sum, t) => sum + t.sold, 0) ?? 0;
@@ -117,13 +119,26 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
             </div>
             <div className="flex flex-col items-end">
               <span className="text-[9px] text-white/30 font-bold mb-1">{totalSold}/{totalSupply} sold</span>
-              <motion.span 
-                whileHover={{ scale: 1.05, backgroundColor: 'var(--accent-purple)' }}
-                whileTap={{ scale: 0.95 }}
-                className="px-6 py-2 rounded-xl bg-[var(--accent-purple)]/80 backdrop-blur-md border border-[var(--accent-purple)]/30 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
-              >
-                View
-              </motion.span>
+              {showEtherscan ? (
+                <a 
+                  href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/20 transition-all italic flex items-center gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Sparkles size={10} />
+                  Etherscan
+                </a>
+              ) : (
+                <motion.span 
+                  whileHover={{ scale: 1.05, backgroundColor: 'var(--accent-purple)' }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-6 py-2 rounded-xl bg-[var(--accent-purple)]/80 backdrop-blur-md border border-[var(--accent-purple)]/30 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
+                >
+                  View
+                </motion.span>
+              )}
             </div>
           </div>
         </div>

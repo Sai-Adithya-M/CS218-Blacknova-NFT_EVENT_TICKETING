@@ -11,10 +11,10 @@ import { useAuthStore } from '../store/useAuthStore';
 import { LoginModal } from '../components/ui/LoginModal';
 
 const CATEGORIES = [
-  { name: 'Music', icon: '🎵', color: 'from-purple-500/20 to-purple-900/10' },
-  { name: 'Sports', icon: '⚡', color: 'from-teal-500/20 to-teal-900/10' },
-  { name: 'Art', icon: '🎨', color: 'from-pink-500/20 to-pink-900/10' },
-  { name: 'Tech', icon: '🔮', color: 'from-blue-500/20 to-blue-900/10' },
+  { name: 'Music', color: 'from-purple-500/20 to-purple-900/10' },
+  { name: 'Sports', color: 'from-teal-500/20 to-teal-900/10' },
+  { name: 'Art', color: 'from-pink-500/20 to-pink-900/10' },
+  { name: 'Tech', color: 'from-blue-500/20 to-blue-900/10' },
 ];
 
 const PLATFORM_HIGHLIGHTS = [
@@ -115,7 +115,7 @@ export const Home: React.FC = () => {
           />
         </div>
 
-        <div className="relative z-10 max-w-7xl mx-auto w-full">
+        <div className="relative z-10 px-12 w-full">
           <div className="grid lg:grid-cols-[1fr_1fr] gap-12 items-center">
             {/* LEFT */}
             <motion.div
@@ -232,7 +232,7 @@ export const Home: React.FC = () => {
       </div>
 
       {/* ─── HOW IT WORKS ─── */}
-      <section className="px-6 py-28 max-w-7xl mx-auto">
+      <section className="px-12 py-28">
         <motion.div
           initial="hidden" whileInView="visible" variants={containerVariants} viewport={{ once: true }}
         >
@@ -266,7 +266,7 @@ export const Home: React.FC = () => {
 
       {/* ─── CATEGORIES ─── */}
       <section className="px-6 py-20 bg-white/[0.015] border-y border-white/5">
-        <div className="max-w-7xl mx-auto">
+        <div className="px-12">
           <div className="flex items-end justify-between mb-12">
             <div>
               <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-2 italic">Browse by Category</p>
@@ -291,7 +291,9 @@ export const Home: React.FC = () => {
                 onClick={() => navigate('/events')}
                 className={`relative p-6 rounded-2xl border border-white/8 bg-gradient-to-br ${cat.color} cursor-pointer group overflow-hidden`}
               >
-                <div className="text-4xl mb-4">{cat.icon}</div>
+                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-[var(--accent-teal)] mb-4">
+                  <Ticket size={20} />
+                </div>
                 <h3 className="font-black uppercase tracking-tight italic text-sm mb-1">{cat.name}</h3>
                 <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">{liveCount} Live Event{liveCount === 1 ? '' : 's'}</p>
                 <ArrowUpRight size={16} className="absolute top-5 right-5 text-white/20 group-hover:text-white/60 transition-colors" />
@@ -303,7 +305,7 @@ export const Home: React.FC = () => {
 
       {/* ─── UPCOMING EVENTS ─── */}
       {activeEvents.length > 0 && (
-        <section className="px-6 py-28 max-w-7xl mx-auto">
+        <section className="px-12 py-28">
           <div className="flex items-end justify-between mb-12">
             <div>
               <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-2 italic">Live Now</p>
@@ -332,7 +334,9 @@ export const Home: React.FC = () => {
                     {event.imageUrl ? (
                       <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-5xl">🎫</div>
+                      <div className="w-full h-full flex items-center justify-center bg-white/5">
+                        <Ticket size={48} className="text-white/10" />
+                      </div>
                     )}
                     <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] border border-white/10">
                       NFT
@@ -364,7 +368,7 @@ export const Home: React.FC = () => {
 
       {/* ─── WHY NFT TICKETING ─── */}
       <section className="px-6 py-28 bg-gradient-to-b from-white/[0.01] to-transparent border-t border-white/5">
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-20 items-center">
+        <div className="px-12 grid lg:grid-cols-2 gap-20 items-center">
           <div>
             <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">The Nifting Advantage</p>
             <h2 className="text-5xl font-black uppercase tracking-tighter italic leading-tight mb-12">
@@ -431,7 +435,7 @@ export const Home: React.FC = () => {
 
       {/* ─── PLATFORM CAPABILITIES ─── */}
       <section className="px-6 py-24">
-        <div className="max-w-5xl mx-auto">
+        <div className="px-12">
           <div className="text-center mb-16">
             <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">Platform Capabilities</p>
             <h2 className="text-4xl font-black uppercase tracking-tighter italic">Built for Web3</h2>
@@ -459,7 +463,7 @@ export const Home: React.FC = () => {
       </section>
 
       {/* ─── CTA ─── */}
-      <section className="px-6 py-28 max-w-5xl mx-auto">
+      <section className="px-12 py-28">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -500,7 +504,7 @@ export const Home: React.FC = () => {
 
       {/* ─── FOOTER ─── */}
       <footer className="border-t border-white/5 bg-black/50 px-6 py-16">
-        <div className="max-w-7xl mx-auto">
+        <div className="px-12">
           <div className="grid md:grid-cols-[2fr_1fr_1fr] gap-12 mb-14">
             <div>
               <Link to="/" className="flex items-center gap-2 mb-5">

@@ -17,7 +17,7 @@ export const MyTickets: React.FC = () => {
   const { tickets, listForResale, cancelResale } = useTicketStore();
   const { events } = useEventStore();
   const { user } = useAuthStore();
-  
+
   const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
   const [activeResaleId, setActiveResaleId] = React.useState<string | null>(null);
 
@@ -28,7 +28,7 @@ export const MyTickets: React.FC = () => {
   const handleResale = async (ticket: any) => {
     const priceStr = resaleInputs[ticket.id];
     if (!priceStr) return;
-    
+
     const price = parseFloat(priceStr);
     if (isNaN(price) || price <= 0) {
       alert("Invalid price.");
@@ -86,11 +86,11 @@ export const MyTickets: React.FC = () => {
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="max-w-7xl mx-auto px-6 py-12"
+      className="px-12 pt-32 pb-12"
     >
       <motion.div variants={itemVariants} className="flex items-end justify-between mb-16">
         <div>
@@ -112,37 +112,36 @@ export const MyTickets: React.FC = () => {
           const purchaseDate = new Date(ticket.purchasedAt);
 
           return (
-            <motion.div 
-              key={ticket.id} 
+            <motion.div
+              key={ticket.id}
               variants={itemVariants}
               whileHover={{ x: 10 }}
               className="glass-panel p-8 rounded-[2.5rem] border border-white/5 hover:border-white/20 transition-all relative overflow-hidden group"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-[var(--accent-purple)]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              
+
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
                 {/* Left: ticket info */}
                 <div className="flex flex-col md:flex-row items-start md:items-center gap-6 flex-1">
                   <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-[var(--accent-purple)] shrink-0 group-hover:scale-110 transition-transform">
                     <TicketIcon size={28} />
                   </div>
-                  
+
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-3 mb-2">
-                      <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest italic ${
-                        ticket.status === 'active' ? 'bg-[var(--status-success)]/10 text-[var(--status-success)]' : 
-                        ticket.status === 'resale' ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]' :
-                        'bg-white/5 text-white/40'
-                      }`}>
+                      <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest italic ${ticket.status === 'active' ? 'bg-[var(--status-success)]/10 text-[var(--status-success)]' :
+                          ticket.status === 'resale' ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]' :
+                            'bg-white/5 text-white/40'
+                        }`}>
                         {ticket.status}
                       </span>
                       <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-purple)]/10 text-[var(--accent-purple)] text-[8px] font-black uppercase tracking-widest">
                         <Tag size={8} />{ticket.tierName}
                       </span>
                     </div>
-                    
+
                     <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">{eventTitle}</h3>
-                    
+
                     {/* Token ID */}
                     <div className="flex items-center gap-2 mb-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
                       <Hash size={12} className="text-[var(--accent-teal)] shrink-0" />
@@ -174,10 +173,10 @@ export const MyTickets: React.FC = () => {
                 {/* Right: price + actions */}
                 <div className="flex flex-col items-end gap-3 shrink-0">
                   <div className="w-24 h-24 bg-white p-2 mb-2 rounded-xl shadow-[0_0_15px_rgba(var(--accent-teal),0.2)]">
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=NIFTING-TICKET-${ticket.id}-${ticket.tokenId}`} 
-                      alt="Ticket Gate QR Code" 
-                      className="w-full h-full object-contain" 
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`)}`}
+                      alt="Ticket Gate QR Code"
+                      className="w-full h-full object-contain"
                     />
                   </div>
                   <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
@@ -187,22 +186,22 @@ export const MyTickets: React.FC = () => {
                   <div className="flex flex-col gap-2">
                     {activeResaleId === ticket.id ? (
                       <div className="flex items-center gap-2 p-2 rounded-2xl bg-white/5 border border-white/10 animate-in fade-in slide-in-from-right-4 duration-300">
-                        <input 
-                          type="number" 
-                          step="0.001" 
+                        <input
+                          type="number"
+                          step="0.001"
                           min="0"
                           placeholder="Price (ETH)"
                           className="w-24 bg-transparent outline-none text-xs font-black text-[var(--accent-teal)] placeholder:text-white/20 px-2"
                           value={resaleInputs[ticket.id] || ''}
                           onChange={(e) => setResaleInputs({ ...resaleInputs, [ticket.id]: e.target.value })}
                         />
-                        <button 
+                        <button
                           onClick={() => handleResale(ticket)}
                           className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)] text-black text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all"
                         >
                           List
                         </button>
-                        <button 
+                        <button
                           onClick={() => setActiveResaleId(null)}
                           className="p-1.5 rounded-xl hover:bg-white/5 text-white/30"
                         >
@@ -222,7 +221,7 @@ export const MyTickets: React.FC = () => {
                         </a>
 
                         {ticket.status === 'active' && (
-                          <button 
+                          <button
                             onClick={() => setActiveResaleId(ticket.id)}
                             className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-panel border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all italic"
                           >
@@ -231,7 +230,7 @@ export const MyTickets: React.FC = () => {
                         )}
 
                         {ticket.status === 'resale' && (
-                          <button 
+                          <button
                             onClick={() => handleCancelResale(ticket)}
                             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic"
                           >
