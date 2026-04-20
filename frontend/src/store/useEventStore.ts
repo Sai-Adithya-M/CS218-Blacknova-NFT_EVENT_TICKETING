@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ethers } from 'ethers';
 import { config } from '../config';
+import { getReadProvider } from '../utils/blockchain';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
@@ -24,6 +25,7 @@ export interface Event {
   location: string;
   category: string;
   organizerId: string;
+  royaltyBps: number;
   status: 'active' | 'past';
   imageUrl?: string;
   tiers: TicketTier[];
@@ -31,6 +33,7 @@ export interface Event {
 
 interface EventState {
   events: Event[];
+  isLoading: boolean;
   createEvent: (event: Omit<Event, 'id' | 'status'> & { id?: string }) => void;
   incrementTierSold: (eventId: string, tierId: string) => void;
   fetchEventsFromChain: () => Promise<void>;
@@ -38,6 +41,7 @@ interface EventState {
 
 export const useEventStore = create<EventState>((set) => ({
   events: [],
+  isLoading: false,
 
   createEvent: (eventData) => set((state) => ({
     events: [
@@ -65,43 +69,32 @@ export const useEventStore = create<EventState>((set) => ({
 
   fetchEventsFromChain: async () => {
     if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      console.error("Contract address is undefined. Cannot connect to contract.");
       return;
     }
 
+    set({ isLoading: true });
     try {
-      let provider;
-      if ((window as any).ethereum) {
-        provider = new ethers.BrowserProvider((window as any).ethereum);
-        try {
-          const network = await provider.getNetwork();
-          if (network.chainId !== 11155111n && network.chainId !== 11155111) {
-            console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
-            provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
-          }
-        } catch (networkErr) {
-          console.error("Failed to fetch network", networkErr);
-          provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
-        }
-      } else {
-        provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
-      }
-
+      console.log("Starting reliable blockchain sync from block:", config.deploymentBlock);
+      const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
 
       const filter = contract.filters.EventCreated();
-      const eventLogs = await contract.queryFilter(filter, 0, "latest");
+      const eventLogs = await contract.queryFilter(filter, config.deploymentBlock, "latest");
+      
+      console.log(`Found ${eventLogs.length} events on-chain.`);
 
       const loadedEvents: Event[] = [];
 
       for (const log of eventLogs) {
         try {
-          const eventId = (log as any).args ? (log as any).args[0] : contract.interface.parseLog(log as any)?.args?.eventId;
+          const parsedLog = contract.interface.parseLog(log as any);
+          const eventId = parsedLog?.args?.eventId || (log as any).args?.[0];
+          
           if (!eventId) continue;
 
           const evt = await contract.fetchEventData(eventId);
-          if (evt.exists || evt[6]) { // Support both array index and object key
-            // UNPACKING METADATA
+          
+          if (evt.exists || evt[6]) {
             const rawName = evt.name || evt[0];
             const nameParts = rawName.split('|||');
 
@@ -111,7 +104,6 @@ export const useEventStore = create<EventState>((set) => ({
             const description = nameParts[3] || '';
             const category = nameParts[4] || 'Music & Concerts';
 
-            // Automatic Expiration: If event date has passed, mark it as past
             const eventDate = new Date(date);
             const isExpired = eventDate < new Date();
 
@@ -123,6 +115,7 @@ export const useEventStore = create<EventState>((set) => ({
               location,
               category,
               organizerId: evt.organiser || evt[4],
+              royaltyBps: Number(evt.royaltyBps || evt[5]),
               status: isExpired ? 'past' : 'active',
               tiers: [
                 {
@@ -136,13 +129,15 @@ export const useEventStore = create<EventState>((set) => ({
             });
           }
         } catch (e) {
-          console.error(`fetchEventData error for event ${log.transactionHash}:`, e);
+          console.error(`Sync error for log:`, e);
         }
       }
 
-      set({ events: loadedEvents });
+      set({ events: loadedEvents, isLoading: false });
+      console.log("Blockchain sync complete.");
     } catch (err) {
-      console.error('fetchEventsFromChain error:', err);
+      console.error('fetchEventsFromChain failed:', err);
+      set({ isLoading: false });
     }
   }
 }));

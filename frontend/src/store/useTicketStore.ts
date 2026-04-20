@@ -1,33 +1,35 @@
 import { create } from 'zustand';
 import { ethers } from 'ethers';
 import { config } from '../config';
+import { getReadProvider } from '../utils/blockchain';
 
 const ABI = [
-  "function nextTokenId() public view returns (uint)",
   "function ownerOf(uint256 tokenId) public view returns (address)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint)",
   "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))",
-  "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint priceWei, bool active))"
+  "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint priceWei, bool active))",
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
 ];
 
 export type TicketStatus = 'active' | 'used' | 'expired' | 'resale';
 
 export interface Ticket {
   id: string;
-  tokenId: string;       // blockchain-style unique ID
-  txHash: string;        // simulated transaction hash
+  tokenId: string;       
+  txHash: string;        
   eventId: string;
   ownerId: string;
   tierName: string;
   tierPrice: number;
   status: TicketStatus;
-  purchasedAt: string;   // ISO timestamp
+  purchasedAt: string;   
   resaleLink?: string;
   resalePrice?: number;
 }
 
 interface TicketState {
   tickets: Ticket[];
+  isLoading: boolean;
   buyTicket: (eventId: string, ownerId: string, tierName: string, tierPrice: number) => Ticket;
   listForResale: (ticketId: string, price: number) => void;
   cancelResale: (ticketId: string) => void;
@@ -37,11 +39,12 @@ interface TicketState {
 
 export const useTicketStore = create<TicketState>((set) => ({
   tickets: [],
+  isLoading: false,
 
   buyTicket: (eventId, ownerId, tierName, tierPrice) => {
     const newTicket: Ticket = {
       id: `tkt_${Date.now()}`,
-      tokenId: '', // Filled by fetch after minting
+      tokenId: '', 
       txHash: '',
       eventId,
       ownerId,
@@ -78,72 +81,78 @@ export const useTicketStore = create<TicketState>((set) => ({
 
   fetchTicketsFromChain: async (userAddress?: string) => {
     if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      console.error("Contract address is undefined. Cannot connect to contract.");
       return;
     }
 
+    set({ isLoading: true });
     try {
-      let provider;
-      if ((window as any).ethereum) {
-        provider = new ethers.BrowserProvider((window as any).ethereum);
-        try {
-          const network = await provider.getNetwork();
-          if (network.chainId !== 11155111n && network.chainId !== 11155111) {
-            console.warn("Wallet not connected to Sepolia. Falling back to explicit Sepolia RPC.");
-            provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
-          }
-        } catch (networkErr) {
-          console.error("Failed to fetch network", networkErr);
-          provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
-        }
-      } else {
-        provider = new ethers.JsonRpcProvider('https://rpc2.sepolia.org');
-      }
-
+      console.log("Discovery: Scanning Transfer logs for address:", userAddress);
+      const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
-      const nextTokenId = await contract.nextTokenId();
+      
       const loadedTickets: Ticket[] = [];
 
-      for (let i = 1; i < Number(nextTokenId); i++) {
+      // 1. Get all tokens RECEIVED by the user
+      const receiveFilter = contract.filters.Transfer(null, userAddress);
+      const receiveLogs = await contract.queryFilter(receiveFilter, config.deploymentBlock, "latest");
+      
+      // 2. Get all tokens SENT by the user (to handle resale/transfer)
+      const sendFilter = contract.filters.Transfer(userAddress, null);
+      const sendLogs = await contract.queryFilter(sendFilter, config.deploymentBlock, "latest");
+
+      // 3. Determine current ownership set
+      const ownedTokenIds = new Set<string>();
+      receiveLogs.forEach((log: any) => {
+        const tokenId = log.args?.[2]?.toString();
+        if (tokenId) ownedTokenIds.add(tokenId);
+      });
+
+      sendLogs.forEach((log: any) => {
+        const tokenId = log.args?.[2]?.toString();
+        if (tokenId) ownedTokenIds.delete(tokenId);
+      });
+
+      console.log(`Log scan complete. Found ${ownedTokenIds.size} tokens currently owned by user.`);
+
+      // 4. Fetch metadata for each currently owned token
+      for (const tokenId of ownedTokenIds) {
         try {
-          const listing = await contract.getResaleListing(i);
-          let owner = '';
-          try {
-            owner = await contract.ownerOf(i);
-          } catch (e) {
-            // Token not minted yet
-            continue;
-          }
+          const currentOwner = await contract.ownerOf(tokenId);
+          // Safety check: verify user still owns it (logs might have stale states)
+          if (userAddress && currentOwner.toLowerCase() !== userAddress.toLowerCase()) continue;
 
-          const isOwner = userAddress && owner.toLowerCase() === userAddress.toLowerCase();
-          const isResale = listing.active || listing[2]; // object key or tuple index
+          const eventId = await contract.tokenToEvent(tokenId);
+          const evt = await contract.fetchEventData(eventId);
+          const listing = await contract.getResaleListing(tokenId);
+          const isResale = listing.active || listing[2];
 
-          // We load tickets if the user owns them OR if they are listed for resale (for marketplace)
-          if (isOwner || isResale) {
-            const eventId = await contract.tokenToEvent(i);
-            const evt = await contract.fetchEventData(eventId);
-
-            loadedTickets.push({
-              id: `tkt_${i}`,
-              tokenId: i.toString(),
-              txHash: '', // Metadata not on chain
-              eventId: `evt_${eventId}`,
-              ownerId: owner,
-              tierName: 'General Access',
-              tierPrice: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
-              status: isResale ? 'resale' : 'active',
-              purchasedAt: new Date().toISOString(), // Keeping current for now as it's not on chain
-              resalePrice: isResale ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined,
-            });
-          }
+          loadedTickets.push({
+            id: `tkt_${tokenId}`,
+            tokenId: tokenId,
+            txHash: '', 
+            eventId: `evt_${eventId}`,
+            ownerId: currentOwner,
+            tierName: 'General Access',
+            tierPrice: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
+            status: isResale ? 'resale' : 'active',
+            purchasedAt: new Date().toISOString(), 
+            resalePrice: isResale ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined,
+          });
         } catch (e) {
-          // Token may not exist, skip
+          console.error(`Error loading metadata for token ${tokenId}:`, e);
         }
       }
 
-      set({ tickets: loadedTickets });
+      // 5. Also fetch any active resale listings that might not be owned by the user 
+      // but were created by them (though standard resale transfers the NFT to the contract or marketplace escrow)
+      // Actually, based on NFTTicket.sol, the seller remains the owner until sold or it's held by the contract.
+      // We already handled user-owned resale above.
+
+      set({ tickets: loadedTickets, isLoading: false });
+      console.log("Ticket sync complete. Total displayed:", loadedTickets.length);
     } catch (err) {
-      console.error('fetchTicketsFromChain error:', err);
+      console.error('fetchTicketsFromChain failed:', err);
+      set({ isLoading: false });
     }
   }
 }));

@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import type { Event } from '../store/useEventStore';
 
 export const BrowseEvents: React.FC = () => {
-  const { events } = useEventStore();
+  const { events, isLoading } = useEventStore();
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
   const activeEvents = events.filter(e => e.status === 'active');
@@ -50,7 +50,12 @@ export const BrowseEvents: React.FC = () => {
         </motion.div>
 
         <div className="flex-1">
-          {activeEvents.length > 0 ? (
+          {isLoading ? (
+            <div className="h-96 flex flex-col items-center justify-center">
+              <div className="w-12 h-12 border-4 border-[var(--accent-purple)]/20 border-t-[var(--accent-purple)] rounded-full animate-spin mb-4" />
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40 italic animate-pulse">Syncing Blockchain...</p>
+            </div>
+          ) : activeEvents.length > 0 ? (
             <motion.div
               variants={containerVariants}
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8"
