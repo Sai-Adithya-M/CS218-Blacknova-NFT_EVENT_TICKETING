@@ -12,18 +12,19 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     uint public nextTokenId = 1;
 
     struct Event {
-        string name;
-        uint maxTickets;
-        uint priceWei;
-        uint ticketsSold;
-        address organiser;
-        uint96 royaltyBps; // e.g., 500 = 5%
+        bytes16 name;
+        uint32 maxTickets;
+        uint48 priceWei;
+        uint32 ticketsSold;
+        uint8 royaltyBps; // e.g., 500 = 5%
         bool exists;
+
+        address organiser;
     }
 
     struct ResaleListing {
         address seller;
-        uint priceWei;
+        uint48 priceWei;
         bool active;
     }
 
@@ -31,18 +32,18 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint => uint) public tokenToEvent;
     mapping(uint => ResaleListing) public resaleListings;
 
-    event EventCreated(uint indexed eventId, address indexed organiser, string name);
+    event EventCreated(uint indexed eventId, address indexed organiser, bytes16 name);
     event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer);
-    event TicketListed(uint indexed tokenId, address indexed seller, uint priceWei);
-    event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei);
+    event TicketListed(uint indexed tokenId, address indexed seller, uint48 priceWei);
+    event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei);
     event ListingCancelled(uint indexed tokenId);
 
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps) public {
-        require(bytes(name).length > 0, "Name cannot be empty");
+    function createEvent(bytes16 name, uint32 maxTickets, uint48 priceWei, uint8 royaltyBps)  {
         require(maxTickets > 0, "Must have tickets");
+        require(bytes(name).length > 0, "Name cannot be empty");
         require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
 
         events[nextEventId] = Event({
@@ -61,9 +62,11 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
     function buyTicket(uint eventId) public payable nonReentrant {
         Event storage evt = events[eventId];
+        require(evt.ticketsSold < evt.maxTickets, "Sold out");
+        require(msg.sender != evt.organiser,"Organiser cannot buy ticket");
         require(evt.exists, "Event does not exist");
         require(msg.value == evt.priceWei, "Incorrect ETH amount");
-        require(evt.ticketsSold < evt.maxTickets, "Sold out");
+        
 
         uint tokenId = nextTokenId;
         nextTokenId++;
@@ -80,7 +83,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- Marketplace Functions ---
-    function listForResale(uint tokenId, uint priceWei) public {
+    function listForResale(uint tokenId, uint48 priceWei) public {
         require(ownerOf(tokenId) == msg.sender, "Not the owner");
         require(priceWei > 0, "Price must be > 0");
 
@@ -99,8 +102,8 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(msg.value == listing.priceWei, "Incorrect ETH amount");
         require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
 
-        (address organiser, uint royaltyAmount) = royaltyInfo(tokenId, msg.value);
-        uint sellerProceeds = msg.value - royaltyAmount;
+        (address organiser, uint48 royaltyAmount) = royaltyInfo(tokenId, msg.value);
+        uint48 sellerProceeds = msg.value - royaltyAmount;
 
         delete resaleListings[tokenId]; // Prevent reentrancy
 
@@ -126,18 +129,18 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- View & Standards ---
-    function fetchEventData(uint eventId) public view returns (Event memory) {
+    function fetchEventData(uint calldata eventId) public view returns (Event memory) {
         return events[eventId];
     }
 
-    function getResaleListing(uint tokenId) public view returns (ResaleListing memory) {
+    function getResaleListing(uint calldata tokenId) public view returns (ResaleListing memory) {
         return resaleListings[tokenId];
     }
 
-    function royaltyInfo(uint tokenId, uint salePrice) public view override returns (address receiver, uint royaltyAmount) {
+    function royaltyInfo(uint calldata tokenId, uint calldata salePrice) public view override returns (address receiver, uint48 royaltyAmount) {
         uint eventId = tokenToEvent[tokenId];
         Event memory evt = events[eventId];
-        uint amount = (salePrice * evt.royaltyBps) / 10000;
+        uint48 amount = (salePrice * evt.royaltyBps) / 10000;
         return (evt.organiser, amount);
     }
 
