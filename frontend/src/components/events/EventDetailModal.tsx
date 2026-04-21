@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { LoginModal } from '../ui/LoginModal';
 import { config } from '../../config';
 import { ethers } from 'ethers';
+import { toast } from 'react-hot-toast';
 
 const CONTRACT_ABI = [
   "function buyTicket(uint eventId) public payable",
@@ -44,7 +45,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   if (!isOpen || !event) return null;
 
   const date = new Date(event.date);
-  const isOrganizer = user?.id === event.organizerId;
+  const isOrganizer = user?.id === event.organizerId || 
+    (user?.walletAddress && event.organizerId && user.walletAddress.toLowerCase() === event.organizerId.toLowerCase());
 
   const handleClose = () => {
     setStep('details');
@@ -268,7 +270,15 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                               <button
                                 key={tier.id}
                                 disabled={isSoldOut}
-                                onClick={() => setSelectedTier(tier)}
+                                onClick={() => {
+                                  if (isOrganizer) {
+                                    toast.error("Owner cannot buy their own tickets", {
+                                      style: { background: '#1a1a24', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }
+                                    });
+                                    return;
+                                  }
+                                  setSelectedTier(tier);
+                                }}
                                 className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
                                   isSoldOut
                                     ? 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
@@ -305,7 +315,15 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                           {resaleTickets.map(tkt => (
                             <button
                               key={tkt.id}
-                              onClick={() => setSelectedResaleTicket(tkt)}
+                              onClick={() => {
+                                if (isOrganizer) {
+                                  toast.error("Owner cannot buy their own tickets", {
+                                    style: { background: '#1a1a24', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }
+                                  });
+                                  return;
+                                }
+                                setSelectedResaleTicket(tkt);
+                              }}
                               className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
                                 selectedResaleTicket?.id === tkt.id
                                   ? 'border-[var(--accent-teal)]/50 bg-[var(--accent-teal)]/10'
