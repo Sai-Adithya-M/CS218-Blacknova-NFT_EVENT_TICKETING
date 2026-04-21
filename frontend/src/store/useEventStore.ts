@@ -55,13 +55,13 @@ export const useEventStore = create<EventState>((set) => ({
     ]
   })),
 
-  incrementTierSold: (eventId, tierId) => set((state) => ({
+  incrementTierSold: (eventId, tierId, quantity = 1) => set((state) => ({
     events: state.events.map(e =>
       e.id === eventId
         ? {
           ...e,
           tiers: e.tiers.map(t =>
-            t.id === tierId ? { ...t, sold: t.sold + 1 } : t
+            t.id === tierId ? { ...t, sold: t.sold + quantity } : t
           )
         }
         : e
