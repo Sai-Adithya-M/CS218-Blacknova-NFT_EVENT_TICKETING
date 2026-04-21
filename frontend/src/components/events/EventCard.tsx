@@ -16,6 +16,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
   const lowestPrice = event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0;
   const totalSold = event.tiers?.reduce((sum, t) => sum + t.sold, 0) ?? 0;
   const totalSupply = event.tiers?.reduce((sum, t) => sum + t.supply, 0) ?? 0;
+  const availability = (totalSold / totalSupply) * 100;
 
   // Parallax Tilt Effect
   const x = useMotionValue(0);
@@ -112,33 +113,48 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-white/10">
-            <div className="flex flex-col">
-              <span className="text-[10px] text-[var(--accent-teal)] font-black uppercase tracking-tighter">From</span>
-              <span className="text-xl font-black text-white tracking-tight">{lowestPrice} ETH</span>
+          <div className="pt-4 border-t border-white/10">
+            <div className="flex items-center justify-between mb-4 bg-black/40 backdrop-blur-xl rounded-2xl px-4 py-3 border border-white/10 hover:border-[var(--accent-teal)]/50 transition-all duration-300 shadow-2xl group/avail">
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] text-white/50 font-black uppercase tracking-[0.2em]">Availability</span>
+                <div style={{ width: `${availability}%` }} className="h-1 w-8 bg-[var(--accent-teal)] rounded-full group-hover/avail: transition-all duration-500" />
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-black text-[var(--accent-teal)] italic tracking-tighter drop-shadow-[0_0_12px_rgba(45,212,191,0.4)] transition-all">
+                  {totalSold}
+                </span>
+                <span className="text-sm font-bold text-white/30 italic">/ {totalSupply}</span>
+                <span className="text-[8px] text-white/50 font-black uppercase ml-1 tracking-widest">Sold</span>
+              </div>
             </div>
-            <div className="flex flex-col items-end">
-              <span className="text-[9px] text-white/30 font-bold mb-1">{totalSold}/{totalSupply} sold</span>
-              {showEtherscan ? (
-                <a 
-                  href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/20 transition-all italic flex items-center gap-1.5"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Sparkles size={10} />
-                  Etherscan
-                </a>
-              ) : (
-                <motion.span 
-                  whileHover={{ scale: 1.05, backgroundColor: 'var(--accent-purple)' }}
-                  whileTap={{ scale: 0.95 }}
-                  className="px-6 py-2 rounded-xl bg-[var(--accent-purple)]/80 backdrop-blur-md border border-[var(--accent-purple)]/30 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
-                >
-                  View
-                </motion.span>
-              )}
+
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className="text-[9px] text-[var(--accent-teal)] font-black uppercase tracking-tighter opacity-70">Price From</span>
+                <span className="text-2xl font-black text-white tracking-tighter">{lowestPrice} ETH</span>
+              </div>
+              <div className="flex flex-col items-end">
+                {showEtherscan ? (
+                  <a 
+                    href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/20 transition-all italic flex items-center gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Sparkles size={10} />
+                    Etherscan
+                  </a>
+                ) : (
+                  <motion.span 
+                    whileHover={{ scale: 1.05, backgroundColor: 'var(--accent-purple)' }}
+                    whileTap={{ scale: 0.95 }}
+                    className="px-8 py-2.5 rounded-2xl bg-[var(--accent-purple)]/80 backdrop-blur-md border border-[var(--accent-purple)]/30 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
+                  >
+                    Buy
+                  </motion.span>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -1,15 +1,46 @@
 import React from 'react';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 
-export const FilterSidebar: React.FC = () => {
+interface FilterSidebarProps {
+  filters: {
+    search: string;
+    category: string;
+    minPrice: string;
+    maxPrice: string;
+    verifiedOnly: boolean;
+  };
+  setFilters: React.Dispatch<React.SetStateAction<{
+    search: string;
+    category: string;
+    minPrice: string;
+    maxPrice: string;
+    verifiedOnly: boolean;
+  }>>;
+}
+
+export const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters }) => {
+  const categories = ['All', 'Music', 'Web3', 'Conference', 'Sports', 'Art'];
+
+  const handleReset = () => {
+    setFilters({
+      search: '',
+      category: 'All',
+      minPrice: '',
+      maxPrice: '',
+      verifiedOnly: false,
+    });
+  };
+
   return (
-    <aside className="hidden lg:block w-72 flex-shrink-0 space-y-8">
+    <aside className="w-72 flex-shrink-0 space-y-8">
       {/* Search */}
       <div className="relative group">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] group-focus-within:text-[var(--accent-purple)] transition-colors" size={20} />
         <input 
           type="text" 
           placeholder="Search events..." 
+          value={filters.search}
+          onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
           className="w-full bg-white/5 border border-[var(--border-glass)] rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-purple)]/50 focus:ring-1 focus:ring-[var(--accent-purple)]/20 transition-all font-medium"
         />
       </div>
@@ -18,13 +49,14 @@ export const FilterSidebar: React.FC = () => {
       <div className="space-y-4">
         <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">Categories</h3>
         <div className="flex flex-col gap-2">
-          {['All', 'Music', 'Web3', 'Conference', 'Sports', 'Art'].map((cat) => (
+          {categories.map((cat) => (
             <button 
               key={cat}
-              className={`flex items-center justify-between px-4 py-3 rounded-xl border border-transparent transition-all ${cat === 'All' ? 'bg-[var(--accent-purple)]/10 border-[var(--accent-purple)]/30 text-[var(--text-primary)]' : 'hover:bg-white/5 text-[var(--text-secondary)]'}`}
+              onClick={() => setFilters(prev => ({ ...prev, category: cat }))}
+              className={`flex items-center justify-between px-4 py-3 rounded-xl border border-transparent transition-all ${filters.category === cat ? 'bg-[var(--accent-purple)]/10 border-[var(--accent-purple)]/30 text-[var(--text-primary)]' : 'hover:bg-white/5 text-[var(--text-secondary)]'}`}
             >
               <span className="font-semibold">{cat}</span>
-              {cat === 'All' && <div className="w-2 h-2 rounded-full bg-[var(--accent-purple)]" />}
+              {filters.category === cat && <div className="w-2 h-2 rounded-full bg-[var(--accent-purple)]" />}
             </button>
           ))}
         </div>
@@ -37,8 +69,20 @@ export const FilterSidebar: React.FC = () => {
           <span className="text-xs font-bold text-[var(--accent-teal)]">ETH</span>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <input type="number" placeholder="Min" className="bg-white/5 border border-[var(--border-glass)] rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)]/50 transition-all text-sm" />
-          <input type="number" placeholder="Max" className="bg-white/5 border border-[var(--border-glass)] rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)]/50 transition-all text-sm" />
+          <input 
+            type="number" 
+            placeholder="Min" 
+            value={filters.minPrice}
+            onChange={(e) => setFilters(prev => ({ ...prev, minPrice: e.target.value }))}
+            className="bg-white/5 border border-[var(--border-glass)] rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)]/50 transition-all text-sm" 
+          />
+          <input 
+            type="number" 
+            placeholder="Max" 
+            value={filters.maxPrice}
+            onChange={(e) => setFilters(prev => ({ ...prev, maxPrice: e.target.value }))}
+            className="bg-white/5 border border-[var(--border-glass)] rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)]/50 transition-all text-sm" 
+          />
         </div>
       </div>
 
@@ -46,17 +90,30 @@ export const FilterSidebar: React.FC = () => {
       <div className="space-y-4">
         <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">Verification</h3>
         <label className="flex items-center gap-3 cursor-pointer group">
-          <div className="w-6 h-6 rounded-md border-2 border-[var(--border-glass)] group-hover:border-[var(--accent-purple)] flex items-center justify-center transition-all">
-            <div className="w-3 h-3 rounded-sm bg-[var(--accent-purple)] scale-0 group-aria-checked:scale-100 transition-transform" />
+          <div 
+            onClick={() => setFilters(prev => ({ ...prev, verifiedOnly: !prev.verifiedOnly }))}
+            className={`w-6 h-6 rounded-md border-2 border-[var(--border-glass)] group-hover:border-[var(--accent-purple)] flex items-center justify-center transition-all ${filters.verifiedOnly ? 'border-[var(--accent-purple)] bg-[var(--accent-purple)]/10' : ''}`}
+          >
+            <div className={`w-3 h-3 rounded-sm bg-[var(--accent-purple)] transition-transform ${filters.verifiedOnly ? 'scale-100' : 'scale-0'}`} />
           </div>
-          <span className="text-sm font-semibold text-[var(--text-secondary)] transition-colors group-hover:text-[var(--text-primary)]">Verified Organizers Only</span>
+          <span 
+            onClick={() => setFilters(prev => ({ ...prev, verifiedOnly: !prev.verifiedOnly }))}
+            className={`text-sm font-semibold transition-colors ${filters.verifiedOnly ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]'}`}
+          >
+            Verified Organizers Only
+          </span>
         </label>
       </div>
 
       {/* Reset */}
-      <button className="w-full py-4 rounded-2xl border border-[var(--border-glass)] text-[var(--text-secondary)] font-bold hover:bg-white/5 transition-all text-sm">
+      <button 
+        onClick={handleReset}
+        className="w-full py-4 rounded-2xl border border-[var(--border-glass)] text-[var(--text-secondary)] font-bold hover:bg-white/5 transition-all text-sm flex items-center justify-center gap-2"
+      >
+        <X size={16} />
         Reset All Filters
       </button>
     </aside>
   );
 };
+
