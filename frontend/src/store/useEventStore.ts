@@ -49,7 +49,7 @@ export const useEventStore = create<EventState>((set) => ({
       {
         ...eventData,
         id: eventData.id || `evt_${Date.now()}`,
-        status: 'active'
+        status: new Date(eventData.date) < new Date() ? 'past' : 'active'
       }
     ]
   })),
