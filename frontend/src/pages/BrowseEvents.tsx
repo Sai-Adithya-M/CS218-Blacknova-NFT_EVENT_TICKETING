@@ -11,7 +11,7 @@ export const BrowseEvents: React.FC = () => {
   const { events, isLoading } = useEventStore();
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
-  const activeEvents = events.filter(e => e.status === 'active');
+  const activeEvents = events.filter(e => e.status === 'active' && new Date(e.date) > new Date());
 
   const containerVariants = {
     hidden: { opacity: 0 },
