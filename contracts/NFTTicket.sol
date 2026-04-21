@@ -41,9 +41,9 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(bytes16 name, uint32 maxTickets, uint48 priceWei, uint8 royaltyBps)  {
+    function createEvent(bytes16 name, uint32 maxTickets, uint48 priceWei, uint8 royaltyBps) external {
         require(maxTickets > 0, "Must have tickets");
-        require(bytes(name).length > 0, "Name cannot be empty");
+        require(name != bytes16(0), "Name cannot be empty");
         require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
 
         events[nextEventId] = Event({
@@ -102,8 +102,8 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(msg.value == listing.priceWei, "Incorrect ETH amount");
         require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
 
-        (address organiser, uint48 royaltyAmount) = royaltyInfo(tokenId, msg.value);
-        uint48 sellerProceeds = msg.value - royaltyAmount;
+        (address organiser, uint256 royaltyAmount) = royaltyInfo(tokenId, msg.value);
+        uint48 sellerProceeds = uint48(msg.value) - uint48(royaltyAmount);
 
         delete resaleListings[tokenId]; // Prevent reentrancy
 
@@ -117,7 +117,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         (bool successSeller, ) = payable(listing.seller).call{value: sellerProceeds}("");
         require(successSeller, "Seller transfer failed");
 
-        emit TicketResold(tokenId, listing.seller, msg.sender, msg.value);
+        emit TicketResold(tokenId, listing.seller, msg.sender, uint48(msg.value));
     }
 
     function cancelResaleListing(uint tokenId) public {
@@ -129,18 +129,18 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- View & Standards ---
-    function fetchEventData(uint calldata eventId) public view returns (Event memory) {
+    function fetchEventData(uint eventId) public view returns (Event memory) {
         return events[eventId];
     }
 
-    function getResaleListing(uint calldata tokenId) public view returns (ResaleListing memory) {
+    function getResaleListing(uint tokenId) public view returns (ResaleListing memory) {
         return resaleListings[tokenId];
     }
 
-    function royaltyInfo(uint calldata tokenId, uint calldata salePrice) public view override returns (address receiver, uint48 royaltyAmount) {
+    function royaltyInfo(uint tokenId, uint salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
         uint eventId = tokenToEvent[tokenId];
         Event memory evt = events[eventId];
-        uint48 amount = (salePrice * evt.royaltyBps) / 10000;
+        uint256 amount = (salePrice * uint256(evt.royaltyBps)) / 10000;
         return (evt.organiser, amount);
     }
 
