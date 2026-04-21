@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck, ImageIcon, X as XIcon, Loader2 } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
 import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
+import { uploadToIPFS, ipfsToHttpUrl } from '../utils/ipfs';
 
 const ABI = [
   "function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps) public",
@@ -25,7 +26,11 @@ export const ManageEvents: React.FC = () => {
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -74,6 +79,22 @@ export const ManageEvents: React.FC = () => {
 
     setIsMining(true);
     try {
+      // Step 1: Upload image to IPFS if one was selected
+      let imageCid = '';
+      if (imageFile) {
+        setIsUploading(true);
+        try {
+          imageCid = await uploadToIPFS(imageFile);
+          console.log('Image uploaded to IPFS:', imageCid);
+        } catch (uploadErr: any) {
+          console.error('IPFS upload failed:', uploadErr);
+          alert('Image upload to IPFS failed: ' + (uploadErr.message || 'Unknown error'));
+          setIsMining(false);
+          setIsUploading(false);
+          return;
+        }
+        setIsUploading(false);
+      }
       if (!(window as any).ethereum) throw new Error("MetaMask not found");
 
       const totalSupply = parsedTiers.reduce((acc, t) => acc + t.supply, 0);
@@ -98,7 +119,7 @@ export const ManageEvents: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
-      const packedMetadata = `${formData.title}|||${formData.location}|||${formData.date}|||${formData.description}|||${formData.category}`;
+      const packedMetadata = `${formData.title}|||${formData.location}|||${formData.date}|||${formData.description}|||${formData.category}|||${imageCid}`;
       const royaltyBps = Math.floor(parseFloat(formData.royalty || '0') * 100);
 
       const tx = await contract.createEvent(packedMetadata, totalSupply, basePriceWei, royaltyBps);
@@ -134,12 +155,15 @@ export const ManageEvents: React.FC = () => {
         category: formData.category,
         organizerId: user.id,
         royaltyBps: royaltyBps,
+        imageUrl: imageCid ? ipfsToHttpUrl(imageCid) : undefined,
         tiers: parsedTiers,
       });
 
       setIsCreating(false);
       setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts', royalty: '5' });
       setTiers([{ name: 'General', price: '', supply: '100' }]);
+      setImageFile(null);
+      setImagePreview(null);
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
       alert(err.message || "Failed to create event.");
@@ -356,19 +380,61 @@ export const ManageEvents: React.FC = () => {
                 </section>
 
                 <section className="space-y-4">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Media Upload</h3>
-                  <div className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all">
-                    <Upload className="text-white/20" size={18} />
-                    <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image (Optional)</span>
-                  </div>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Event Banner (IPFS)</h3>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setImageFile(file);
+                        const reader = new FileReader();
+                        reader.onload = () => setImagePreview(reader.result as string);
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                  />
+                  {imagePreview ? (
+                    <div className="relative rounded-xl overflow-hidden border border-white/10">
+                      <img src={imagePreview} alt="Preview" className="w-full h-48 object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                      <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                        <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest border border-[var(--accent-teal)]/30 flex items-center gap-1.5">
+                          <ImageIcon size={10} />
+                          {imageFile?.name}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setImageFile(null); setImagePreview(null); }}
+                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white/60 hover:text-white hover:bg-red-500/40 transition-all"
+                      >
+                        <XIcon size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-8 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-white/[0.04] hover:border-[var(--accent-teal)]/30 transition-all group"
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-[var(--accent-teal)]/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Upload className="text-[var(--accent-teal)]" size={20} />
+                      </div>
+                      <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Click to upload banner image</span>
+                      <span className="text-[9px] text-white/15 font-medium">Stored permanently on IPFS via Pinata</span>
+                    </div>
+                  )}
                 </section>
 
                 <button
                   type="submit"
-                  disabled={isMining}
-                  className="w-full py-4 rounded-xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:shadow-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isMining || isUploading}
+                  className="w-full py-4 rounded-xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:shadow-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {isMining ? 'Minting on Blockchain...' : 'Create Event'}
+                  {isUploading && <Loader2 size={14} className="animate-spin" />}
+                  {isUploading ? 'Uploading Image to IPFS...' : isMining ? 'Minting on Blockchain...' : 'Create Event'}
                 </button>
               </form>
             </div>
