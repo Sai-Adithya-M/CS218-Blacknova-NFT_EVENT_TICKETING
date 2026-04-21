@@ -1,17 +1,68 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useEventStore } from '../store/useEventStore';
 import { EventCard } from '../components/events/EventCard';
 import { EventDetailModal } from '../components/events/EventDetailModal';
 import { FilterSidebar } from '../components/events/FilterSidebar';
-import { SlidersHorizontal, SearchX } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { SlidersHorizontal, SearchX, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { Event } from '../store/useEventStore';
 
 export const BrowseEvents: React.FC = () => {
   const { events, isLoading } = useEventStore();
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    search: '',
+    category: 'All',
+    minPrice: '',
+    maxPrice: '',
+    verifiedOnly: false,
+  });
 
-  const activeEvents = events.filter(e => e.status === 'active' && new Date(e.date) > new Date());
+  const filteredEvents = useMemo(() => {
+    return events.filter(event => {
+      // Basic status and expiration filter
+      const isActive = event.status === 'active' && new Date(event.date) > new Date();
+      if (!isActive) return false;
+
+      // Search filter (title, location, description)
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        const matchesSearch = 
+          event.title.toLowerCase().includes(searchLower) || 
+          event.location.toLowerCase().includes(searchLower) ||
+          event.description.toLowerCase().includes(searchLower);
+        if (!matchesSearch) return false;
+      }
+
+      // Category filter
+      if (filters.category !== 'All') {
+        const eventCategory = event.category.toLowerCase();
+        const selectedCategory = filters.category.toLowerCase();
+        // Handle "Music" vs "Music & Concerts"
+        if (!eventCategory.includes(selectedCategory) && !selectedCategory.includes(eventCategory)) {
+          return false;
+        }
+      }
+
+      // Price filter
+      const lowestPrice = event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0;
+      if (filters.minPrice && lowestPrice < parseFloat(filters.minPrice)) {
+        return false;
+      }
+      if (filters.maxPrice && lowestPrice > parseFloat(filters.maxPrice)) {
+        return false;
+      }
+
+      // Verification filter (assuming all are verified for now as per UI, or can add logic here)
+      if (filters.verifiedOnly) {
+        // Since EventCard shows "Verified Event" for all, we can just keep them.
+        // If there was a real verified flag, we'd check it here.
+      }
+
+      return true;
+    });
+  }, [events, filters]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -23,6 +74,18 @@ export const BrowseEvents: React.FC = () => {
     visible: { opacity: 1, y: 0 }
   };
 
+  const clearFilters = () => {
+    setFilters({
+      search: '',
+      category: 'All',
+      minPrice: '',
+      maxPrice: '',
+      verifiedOnly: false,
+    });
+  };
+
+  const hasActiveFilters = filters.search || filters.category !== 'All' || filters.minPrice || filters.maxPrice || filters.verifiedOnly;
+
   return (
     <motion.div
       initial="hidden"
@@ -32,22 +95,62 @@ export const BrowseEvents: React.FC = () => {
     >
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
-          <h1 className="text-6xl font-black tracking-tighter mb-2 italic text-white">MARKETPLACE</h1>
+          <h1 className="text-6xl font-black tracking-tighter mb-2 italic text-white flex items-center gap-4">
+            MARKETPLACE
+            {hasActiveFilters && (
+              <button 
+                onClick={clearFilters}
+                className="text-xs font-black uppercase tracking-widest text-[var(--accent-purple)] hover:text-white transition-colors bg-[var(--accent-purple)]/10 px-3 py-1 rounded-full border border-[var(--accent-purple)]/20"
+              >
+                Clear Filters
+              </button>
+            )}
+          </h1>
           <p className="text-white/60 max-w-lg font-medium">
             Discover and trade digital collectible tickets for the world's most exclusive experiences.
           </p>
         </div>
 
-        <button className="lg:hidden flex items-center gap-2 px-6 py-3 rounded-2xl glass-panel border border-white/10 font-bold text-sm">
+        <button 
+          onClick={() => setShowMobileFilters(!showMobileFilters)}
+          className="lg:hidden flex items-center gap-2 px-6 py-3 rounded-2xl glass-panel border border-white/10 font-bold text-sm"
+        >
           <SlidersHorizontal size={18} />
-          Filters
+          Filters {hasActiveFilters && <span className="w-2 h-2 rounded-full bg-[var(--accent-purple)]" />}
         </button>
       </motion.div>
 
-      <div className="flex gap-12">
-        <motion.div variants={itemVariants} className="hidden lg:block">
-          <FilterSidebar />
+      <div className="flex gap-12 relative">
+        {/* Desktop Sidebar */}
+        <motion.div variants={itemVariants} className="hidden lg:block sticky top-32 h-fit">
+          <FilterSidebar filters={filters} setFilters={setFilters} />
         </motion.div>
+
+        {/* Mobile Sidebar Overlay */}
+        <AnimatePresence>
+          {showMobileFilters && (
+            <motion.div 
+              initial={{ opacity: 0, x: -100 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -100 }}
+              className="fixed inset-0 z-50 lg:hidden p-6 pt-32 bg-black overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-2xl font-black italic">FILTERS</h2>
+                <button onClick={() => setShowMobileFilters(false)} className="p-2 glass-panel rounded-xl">
+                  <X size={24} />
+                </button>
+              </div>
+              <FilterSidebar filters={filters} setFilters={setFilters} />
+              <button 
+                onClick={() => setShowMobileFilters(false)}
+                className="w-full mt-8 py-4 rounded-2xl bg-[var(--accent-purple)] text-white font-black uppercase tracking-widest"
+              >
+                Show Results
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="flex-1">
           {isLoading ? (
@@ -55,12 +158,12 @@ export const BrowseEvents: React.FC = () => {
               <div className="w-12 h-12 border-4 border-[var(--accent-purple)]/20 border-t-[var(--accent-purple)] rounded-full animate-spin mb-4" />
               <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40 italic animate-pulse">Syncing Blockchain...</p>
             </div>
-          ) : activeEvents.length > 0 ? (
+          ) : filteredEvents.length > 0 ? (
             <motion.div
               variants={containerVariants}
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8"
             >
-              {activeEvents.map((event, i) => (
+              {filteredEvents.map((event, i) => (
                 <motion.div
                   key={event.id}
                   variants={itemVariants}
@@ -78,8 +181,16 @@ export const BrowseEvents: React.FC = () => {
               <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-6">
                 <SearchX className="text-white/20" size={32} />
               </div>
-              <h3 className="text-xl font-bold mb-2">No Events Yet</h3>
-              <p className="text-[var(--text-secondary)]">Be the first to create an event and list it on the marketplace.</p>
+              <h3 className="text-xl font-bold mb-2">No Matches Found</h3>
+              <p className="text-[var(--text-secondary)]">Try adjusting your filters or search terms.</p>
+              {hasActiveFilters && (
+                <button 
+                  onClick={clearFilters}
+                  className="mt-6 px-8 py-3 rounded-2xl bg-[var(--accent-purple)]/10 border border-[var(--accent-purple)]/30 text-[var(--accent-purple)] font-bold text-sm hover:bg-[var(--accent-purple)]/20 transition-all"
+                >
+                  Clear All Filters
+                </button>
+              )}
             </motion.div>
           )}
         </div>
@@ -94,3 +205,4 @@ export const BrowseEvents: React.FC = () => {
     </motion.div>
   );
 };
+

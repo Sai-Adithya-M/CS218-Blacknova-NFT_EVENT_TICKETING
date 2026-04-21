@@ -65,6 +65,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(evt.ticketsSold < evt.maxTickets, "Sold out");
         require(msg.sender != evt.organiser,"Organiser cannot buy ticket");
         require(evt.exists, "Event does not exist");
+        require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
         require(msg.value == evt.priceWei, "Incorrect ETH amount");
         
 
@@ -99,6 +100,10 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     function buyResaleTicket(uint tokenId) public payable nonReentrant {
         ResaleListing memory listing = resaleListings[tokenId];
         require(listing.active, "Not for sale");
+        
+        uint eventId = tokenToEvent[tokenId];
+        require(msg.sender != events[eventId].organiser, "Organiser cannot buy their own tickets");
+
         require(msg.value == listing.priceWei, "Incorrect ETH amount");
         require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
 
