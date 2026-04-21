@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { X, Calendar, MapPin, Users, Tag, ShieldCheck, ExternalLink, Loader2, CheckCircle, AlertCircle, Wallet } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Event, TicketTier } from '../../store/useEventStore';
@@ -45,6 +45,29 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
   const date = new Date(event.date);
   const isOrganizer = user?.id === event.organizerId;
+
+  const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
+  const extractCid = (url?: string): string | null => {
+    if (!url) return null;
+    const match = url.match(/\/ipfs\/(.+)$/);
+    return match ? match[1] : null;
+  };
+  const cid = extractCid(event.imageUrl);
+  const gateways = [
+    'https://cloudflare-ipfs.com/ipfs',
+    'https://dweb.link/ipfs',
+    'https://ipfs.io/ipfs',
+    'https://gateway.pinata.cloud/ipfs',
+  ];
+  const [modalGwIndex, setModalGwIndex] = useState(0);
+  const modalImageSrc = cid
+    ? `${gateways[modalGwIndex]}/${cid}`
+    : (event.imageUrl || FALLBACK_IMG);
+  const handleModalImgError = useCallback(() => {
+    if (cid && modalGwIndex < gateways.length - 1) {
+      setModalGwIndex(prev => prev + 1);
+    }
+  }, [cid, modalGwIndex, gateways.length]);
 
   const handleClose = () => {
     setStep('details');
@@ -206,9 +229,10 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   {/* Event Header */}
                   <div className="relative h-48 rounded-t-3xl overflow-hidden">
                     <img
-                      src={event.imageUrl || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80'}
+                      src={modalImageSrc}
                       alt={event.title}
                       className="w-full h-full object-cover"
+                      onError={handleModalImgError}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/50 to-transparent" />
                     <div className="absolute bottom-0 left-0 p-6">

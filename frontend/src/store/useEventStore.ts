@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ethers } from 'ethers';
 import { config } from '../config';
 import { getReadProvider } from '../utils/blockchain';
+import { ipfsToHttpUrl } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
@@ -103,6 +104,7 @@ export const useEventStore = create<EventState>((set) => ({
             const date = nameParts[2] || new Date().toISOString();
             const description = nameParts[3] || '';
             const category = nameParts[4] || 'Music & Concerts';
+            const imageCid = nameParts[5] || '';
 
             const eventDate = new Date(date);
             const isExpired = eventDate < new Date();
@@ -117,6 +119,7 @@ export const useEventStore = create<EventState>((set) => ({
               organizerId: evt.organiser || evt[4],
               royaltyBps: Number(evt.royaltyBps || evt[5]),
               status: isExpired ? 'past' : 'active',
+              imageUrl: imageCid ? ipfsToHttpUrl(imageCid) : undefined,
               tiers: [
                 {
                   id: `tier_evt_${eventId.toString()}`,

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Calendar, MapPin, Sparkles } from 'lucide-react';
 import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import type { Event } from '../../store/useEventStore';
@@ -16,6 +16,35 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
   const lowestPrice = event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0;
   const totalSold = event.tiers?.reduce((sum, t) => sum + t.sold, 0) ?? 0;
   const totalSupply = event.tiers?.reduce((sum, t) => sum + t.supply, 0) ?? 0;
+
+  const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
+
+  // Extract CID from the imageUrl if it's an IPFS gateway URL
+  const extractCid = (url?: string): string | null => {
+    if (!url) return null;
+    const match = url.match(/\/ipfs\/(.+)$/);
+    return match ? match[1] : null;
+  };
+
+  const cid = extractCid(event.imageUrl);
+  const gateways = [
+    'https://cloudflare-ipfs.com/ipfs',
+    'https://dweb.link/ipfs',
+    'https://ipfs.io/ipfs',
+    'https://gateway.pinata.cloud/ipfs',
+  ];
+
+  const [gatewayIndex, setGatewayIndex] = useState(0);
+
+  const currentImageSrc = cid
+    ? `${gateways[gatewayIndex]}/${cid}`
+    : (event.imageUrl || FALLBACK_IMG);
+
+  const handleImageError = useCallback(() => {
+    if (cid && gatewayIndex < gateways.length - 1) {
+      setGatewayIndex(prev => prev + 1);
+    }
+  }, [cid, gatewayIndex, gateways.length]);
 
   // Parallax Tilt Effect
   const x = useMotionValue(0);
@@ -70,12 +99,13 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
       {/* Event Image */}
       <div className="absolute inset-0 z-0">
         <motion.img 
-          src={event.imageUrl || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80'} 
+          src={currentImageSrc} 
           alt={event.title}
           className="w-full h-full object-cover"
           style={{ transform: "translateZ(0px)" }}
           whileHover={{ scale: 1.1 }}
           transition={{ duration: 0.7 }}
+          onError={handleImageError}
         />
       </div>
 
