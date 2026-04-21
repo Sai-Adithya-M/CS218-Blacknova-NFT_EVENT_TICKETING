@@ -5,6 +5,7 @@ import { getReadProvider } from '../utils/blockchain';
 
 const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
+  "function nextTokenId() public view returns (uint)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint)",
   "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))",
   "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint priceWei, bool active))",
@@ -27,19 +28,34 @@ export interface Ticket {
   resalePrice?: number;
 }
 
+export interface ResaleListing {
+  id: string;
+  tokenId: string;
+  eventId: string;
+  seller: string;
+  priceEth: number;
+  tierName: string;
+  eventName: string;
+}
+
 interface TicketState {
   tickets: Ticket[];
+  resaleListings: ResaleListing[];
   isLoading: boolean;
+  isLoadingResale: boolean;
   buyTicket: (eventId: string, ownerId: string, tierName: string, tierPrice: number) => Ticket;
   listForResale: (ticketId: string, price: number) => void;
   cancelResale: (ticketId: string) => void;
   buyResaleTicket: (ticketId: string, newOwnerId: string) => void;
   fetchTicketsFromChain: (userAddress?: string) => Promise<void>;
+  fetchAllResaleListings: () => Promise<void>;
 }
 
 export const useTicketStore = create<TicketState>((set) => ({
   tickets: [],
+  resaleListings: [],
   isLoading: false,
+  isLoadingResale: false,
 
   buyTicket: (eventId, ownerId, tierName, tierPrice) => {
     const newTicket: Ticket = {
@@ -143,16 +159,60 @@ export const useTicketStore = create<TicketState>((set) => ({
         }
       }
 
-      // 5. Also fetch any active resale listings that might not be owned by the user 
-      // but were created by them (though standard resale transfers the NFT to the contract or marketplace escrow)
-      // Actually, based on NFTTicket.sol, the seller remains the owner until sold or it's held by the contract.
-      // We already handled user-owned resale above.
-
       set({ tickets: loadedTickets, isLoading: false });
       console.log("Ticket sync complete. Total displayed:", loadedTickets.length);
     } catch (err) {
       console.error('fetchTicketsFromChain failed:', err);
       set({ isLoading: false });
+    }
+  },
+
+  fetchAllResaleListings: async () => {
+    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
+      return;
+    }
+
+    set({ isLoadingResale: true });
+    try {
+      const provider = getReadProvider();
+      const contract = new ethers.Contract(config.contractAddress, ABI, provider);
+      const nextTokenId = await contract.nextTokenId();
+      const total = Number(nextTokenId);
+
+      console.log(`Scanning ${total - 1} tokens for resale listings...`);
+      const listings: ResaleListing[] = [];
+
+      for (let i = 1; i < total; i++) {
+        try {
+          const listing = await contract.getResaleListing(i);
+          const isActive = listing.active || listing[2];
+          if (!isActive) continue;
+
+          const eventId = await contract.tokenToEvent(i);
+          const evt = await contract.fetchEventData(eventId);
+          const rawName = evt.name || evt[0];
+          const nameParts = rawName.split('|||');
+          const eventTitle = nameParts[0] || rawName;
+
+          listings.push({
+            id: `resale_${i}`,
+            tokenId: i.toString(),
+            eventId: `evt_${eventId.toString()}`,
+            seller: listing.seller || listing[0],
+            priceEth: parseFloat(ethers.formatEther(listing.priceWei || listing[1])),
+            tierName: 'Resale Ticket',
+            eventName: eventTitle,
+          });
+        } catch (e) {
+          // Token may not exist or other error, skip
+        }
+      }
+
+      set({ resaleListings: listings, isLoadingResale: false });
+      console.log(`Resale scan complete. Found ${listings.length} active listings.`);
+    } catch (err) {
+      console.error('fetchAllResaleListings failed:', err);
+      set({ isLoadingResale: false });
     }
   }
 }));

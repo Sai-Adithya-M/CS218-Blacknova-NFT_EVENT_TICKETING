@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { Event, TicketTier } from '../../store/useEventStore';
 import { useEventStore } from '../../store/useEventStore';
 import { useTicketStore } from '../../store/useTicketStore';
+import type { ResaleListing } from '../../store/useTicketStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { LoginModal } from '../ui/LoginModal';
 import { config } from '../../config';
@@ -34,12 +35,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const [purchasedTxHash, setPurchasedTxHash] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  
-  const { buyTicket, buyResaleTicket: storeBuyResale, tickets } = useTicketStore();
+
+  const { buyTicket, buyResaleTicket: storeBuyResale, tickets, resaleListings, fetchAllResaleListings } = useTicketStore();
   const { incrementTierSold } = useEventStore();
   const { user, isAuthenticated, updateWallet } = useAuthStore();
 
-  const resaleTickets = tickets.filter(t => t.eventId === event?.id && t.status === 'resale');
+  // Combine: global resale listings for this event + user's own listed tickets
+  const eventResaleListings = resaleListings.filter(l => l.eventId === event?.id);
+  const userListedTickets = tickets.filter(t => t.eventId === event?.id && t.status === 'resale');
 
   if (!isOpen || !event) return null;
 
@@ -78,7 +81,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
-      
+
       // Ensure correct network
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(config.sepoliaChainId)) {
@@ -91,11 +94,10 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
+      // Send the selected tier's price — contract now accepts msg.value >= basePriceWei
       const priceWei = ethers.parseEther(selectedTier.price.toString());
-      
-      // Trigger real blockchain transaction
-      // Assuming event.id is the numeric ID from the blockchain (synced in ManageEvents)
-      const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1; 
+
+      const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1;
       const tx = await contract.buyTicket(numericEventId, { value: priceWei });
       const receipt = await tx.wait();
 
@@ -120,13 +122,18 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       buyTicket(event.id, user.id, selectedTier.name, selectedTier.price);
       incrementTierSold(event.id, selectedTier.id);
       updateWallet(-selectedTier.price);
-      
+
       setPurchasedTokenId(tokenId);
       setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
       console.error("Purchase failed:", err);
-      setErrorMsg(err.message || 'Transaction failed. Please try again.');
+      // User rejected in MetaMask — just go back to details
+      if (err?.code === 4001 || err?.code === 'ACTION_REJECTED' || err?.info?.error?.code === 4001) {
+        setStep('details');
+        return;
+      }
+      setErrorMsg(err?.reason || err?.shortMessage || 'Transaction failed. Please try again.');
       setStep('error');
     }
   };
@@ -152,19 +159,30 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      const priceWei = ethers.parseEther(selectedResaleTicket.resalePrice.toString());
-      
+      const priceWei = ethers.parseEther(selectedResaleTicket.priceEth.toString());
+
       const tx = await contract.buyResaleTicket(selectedResaleTicket.tokenId, { value: priceWei });
       const receipt = await tx.wait();
 
-      storeBuyResale(selectedResaleTicket.id, user.id);
-      
+      // If the ticket was also in local store, update it
+      const localTicket = tickets.find(t => t.tokenId === selectedResaleTicket.tokenId);
+      if (localTicket) {
+        storeBuyResale(localTicket.id, user.id);
+      }
+
+      // Re-fetch resale listings to reflect the purchase
+      fetchAllResaleListings();
+
       setPurchasedTokenId(selectedResaleTicket.tokenId);
       setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
       console.error("Resale purchase failed:", err);
-      setErrorMsg(err.message || 'Transaction failed.');
+      if (err?.code === 4001 || err?.code === 'ACTION_REJECTED' || err?.info?.error?.code === 4001) {
+        setStep('details');
+        return;
+      }
+      setErrorMsg(err?.reason || err?.shortMessage || 'Transaction failed.');
       setStep('error');
     }
   };
@@ -232,17 +250,17 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
                     {/* Market Type Toggle */}
                     <div className="flex p-1 rounded-xl bg-white/5 border border-white/10">
-                      <button 
+                      <button
                         onClick={() => setMarketType('primary')}
                         className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'primary' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
                       >
                         Primary Sale
                       </button>
-                      <button 
+                      <button
                         onClick={() => setMarketType('secondary')}
                         className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'secondary' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
                       >
-                        Secondary Market ({resaleTickets.length})
+                        Secondary Market ({eventResaleListings.length})
                       </button>
                     </div>
 
@@ -269,13 +287,12 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                                 key={tier.id}
                                 disabled={isSoldOut}
                                 onClick={() => setSelectedTier(tier)}
-                                className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
-                                  isSoldOut
+                                className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${isSoldOut
                                     ? 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
                                     : isSelected
-                                    ? 'border-[var(--accent-purple)]/50 bg-[var(--accent-purple)]/10'
-                                    : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
-                                }`}
+                                      ? 'border-[var(--accent-purple)]/50 bg-[var(--accent-purple)]/10'
+                                      : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
+                                  }`}
                               >
                                 <div>
                                   <p className="font-black uppercase tracking-tight italic">{tier.name}</p>
@@ -302,30 +319,29 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                       <div>
                         <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] mb-4 italic">Available Resale Tickets</h3>
                         <div className="space-y-3">
-                          {resaleTickets.map(tkt => (
+                          {eventResaleListings.map(listing => (
                             <button
-                              key={tkt.id}
-                              onClick={() => setSelectedResaleTicket(tkt)}
-                              className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
-                                selectedResaleTicket?.id === tkt.id
+                              key={listing.id}
+                              onClick={() => setSelectedResaleTicket(listing)}
+                              className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${selectedResaleTicket?.id === listing.id
                                   ? 'border-[var(--accent-teal)]/50 bg-[var(--accent-teal)]/10'
                                   : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
-                              }`}
+                                }`}
                             >
                               <div>
-                                <p className="font-black uppercase tracking-tight italic">{tkt.tierName}</p>
+                                <p className="font-black uppercase tracking-tight italic">{listing.tierName}</p>
                                 <p className="text-[9px] font-mono text-white/40 font-bold mt-0.5">
-                                  ID: {tkt.tokenId.slice(0, 10)}...
+                                  Token #{listing.tokenId} · Seller: {listing.seller.slice(0, 6)}...{listing.seller.slice(-4)}
                                 </p>
                               </div>
                               <div className="text-right">
                                 <p className="text-xl font-black text-[var(--accent-teal)]">
-                                  {tkt.resalePrice} ETH
+                                  {listing.priceEth} ETH
                                 </p>
                               </div>
                             </button>
                           ))}
-                          {resaleTickets.length === 0 && (
+                          {eventResaleListings.length === 0 && (
                             <div className="py-12 text-center rounded-3xl border border-dashed border-white/5 bg-white/[0.01]">
                               <p className="text-[10px] font-black uppercase tracking-widest text-white/20 italic">No tickets listed for resale.</p>
                             </div>
@@ -351,16 +367,15 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                           whileTap={{ scale: 0.98 }}
                           disabled={marketType === 'primary' ? !selectedTier : !selectedResaleTicket}
                           onClick={marketType === 'primary' ? handlePurchase : handleBuyResale}
-                          className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all ${
-                            (marketType === 'primary' ? selectedTier : selectedResaleTicket)
+                          className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all ${(marketType === 'primary' ? selectedTier : selectedResaleTicket)
                               ? 'bg-white text-black shadow-2xl hover:shadow-white/20'
                               : 'bg-white/10 text-white/30 cursor-not-allowed'
-                          }`}
+                            }`}
                         >
                           <Wallet size={16} />
-                          {marketType === 'primary' 
+                          {marketType === 'primary'
                             ? (selectedTier ? `Purchase ${selectedTier.name} — ${selectedTier.price} ETH` : 'Select a tier to continue')
-                            : (selectedResaleTicket ? `Buy Resale Ticket — ${selectedResaleTicket.resalePrice} ETH` : 'Select a ticket to buy')
+                            : (selectedResaleTicket ? `Buy Resale Ticket — ${selectedResaleTicket.priceEth} ETH` : 'Select a ticket to buy')
                           }
                         </motion.button>
                       )}

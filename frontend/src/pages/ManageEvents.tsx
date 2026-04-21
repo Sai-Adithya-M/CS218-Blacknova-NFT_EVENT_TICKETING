@@ -21,7 +21,7 @@ interface TierFormData {
 }
 
 export const ManageEvents: React.FC = () => {
-  const { events, isLoading, createEvent } = useEventStore();
+  const { events, isLoading, createEvent, fetchEventsFromChain } = useEventStore();
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
@@ -55,6 +55,9 @@ export const ManageEvents: React.FC = () => {
   const updateTier = (index: number, field: keyof TierFormData, value: string) => {
     setTiers(tiers.map((t, i) => i === index ? { ...t, [field]: value } : t));
   };
+
+  // Sanitize user inputs to prevent '|||' from corrupting the packed metadata format
+  const sanitize = (s: string) => s.replace(/\|\|\|/g, ' — ');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,8 +101,13 @@ export const ManageEvents: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
-      const packedMetadata = `${formData.title}|||${formData.location}|||${formData.date}|||${formData.description}|||${formData.category}`;
+      // Encode tier data as JSON so it survives the blockchain round-trip
+      // Sanitize all user-entered fields to prevent '|||' from breaking the parser
+      const tiersPayload = JSON.stringify(parsedTiers.map(t => ({ n: t.name, p: t.price, s: t.supply })));
+      const packedMetadata = `${sanitize(formData.title)}|||${sanitize(formData.location)}|||${formData.date}|||${sanitize(formData.description)}|||${sanitize(formData.category)}|||${tiersPayload}`;
       const royaltyBps = Math.floor(parseFloat(formData.royalty || '0') * 100);
+
+      console.log('Creating event with packed metadata:', packedMetadata);
 
       const tx = await contract.createEvent(packedMetadata, totalSupply, basePriceWei, royaltyBps);
       const receipt = await tx.wait();
@@ -117,7 +125,8 @@ export const ManageEvents: React.FC = () => {
           if (eventCreatedLog) {
             const parsedLog = contract.interface.parseLog(eventCreatedLog);
             if (parsedLog && parsedLog.args && parsedLog.args.eventId) {
-              blockchainEventId = parsedLog.args.eventId.toString();
+              // Use consistent 'evt_X' format to match fetchEventsFromChain decoder
+              blockchainEventId = `evt_${parsedLog.args.eventId.toString()}`;
             }
           }
         } catch (err) {
@@ -137,12 +146,18 @@ export const ManageEvents: React.FC = () => {
         tiers: parsedTiers,
       });
 
+      // Re-fetch from blockchain to ensure the store has properly decoded tier data
+      // (this replaces the local store with the canonical on-chain version)
+      setTimeout(() => fetchEventsFromChain(), 2000);
+
       setIsCreating(false);
       setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts', royalty: '5' });
       setTiers([{ name: 'General', price: '', supply: '100' }]);
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
-      alert(err.message || "Failed to create event.");
+      // User rejected in MetaMask — no alert needed
+      if (err?.code === 4001 || err?.code === 'ACTION_REJECTED' || err?.info?.error?.code === 4001) return;
+      alert(err?.reason || err?.shortMessage || "Failed to create event.");
     } finally {
       setIsMining(false);
     }

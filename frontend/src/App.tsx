@@ -45,11 +45,13 @@ function AppContent() {
   const { user } = useAuthStore();
   const fetchEvents = useEventStore(state => state.fetchEventsFromChain);
   const fetchTickets = useTicketStore(state => state.fetchTicketsFromChain);
+  const fetchResaleListings = useTicketStore(state => state.fetchAllResaleListings);
 
   React.useEffect(() => {
     // Initial fetch from blockchain
     fetchEvents();
     fetchTickets(user?.walletAddress);
+    fetchResaleListings();
 
     if ((window as any).ethereum) {
       (window as any).ethereum.on('chainChanged', () => {
@@ -67,7 +69,7 @@ function AppContent() {
         window.location.reload();
       });
     }
-  }, [user?.walletAddress, fetchEvents, fetchTickets]);
+  }, [user?.walletAddress, fetchEvents, fetchTickets, fetchResaleListings]);
 
   return (
     <AnimatePresence mode="wait">

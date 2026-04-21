@@ -5,5 +5,5 @@ export const config = {
   // Using a cluster of reliable public RPC nodes
   sepoliaRpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
   // EXACT Deployment Block found on Etherscan: 10659564
-  deploymentBlock: 10659564, 
+  deploymentBlock: 10659564,
 };

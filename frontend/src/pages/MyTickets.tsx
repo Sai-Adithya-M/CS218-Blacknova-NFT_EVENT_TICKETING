@@ -2,7 +2,7 @@ import React from 'react';
 import { useTicketStore } from '../store/useTicketStore';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag } from 'lucide-react';
+import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, TrendingUp, TrendingDown, ArrowRight } from 'lucide-react';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
@@ -14,7 +14,7 @@ const CONTRACT_ABI = [
 ];
 
 export const MyTickets: React.FC = () => {
-  const { tickets, isLoading: isTicketsLoading, listForResale, cancelResale } = useTicketStore();
+  const { tickets, isLoading: isTicketsLoading, listForResale, cancelResale, fetchAllResaleListings } = useTicketStore();
   const { events, isLoading: isEventsLoading } = useEventStore();
   const { user } = useAuthStore();
   const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
@@ -52,6 +52,7 @@ export const MyTickets: React.FC = () => {
       await tx.wait();
 
       listForResale(ticket.id, price);
+      fetchAllResaleListings();
       setActiveResaleId(null);
       setResaleInputs(prev => {
         const next = { ...prev };
@@ -61,7 +62,9 @@ export const MyTickets: React.FC = () => {
       alert("Ticket listed for resale on-chain!");
     } catch (err: any) {
       console.error("Resale listing failed:", err);
-      alert(err.message || "Failed to list for resale.");
+      // User rejected in MetaMask — no alert needed
+      if (err?.code === 4001 || err?.code === 'ACTION_REJECTED' || err?.info?.error?.code === 4001) return;
+      alert(err?.reason || err?.shortMessage || "Failed to list for resale.");
     }
   };
 
@@ -75,10 +78,12 @@ export const MyTickets: React.FC = () => {
       await tx.wait();
 
       cancelResale(ticket.id);
+      fetchAllResaleListings();
       alert("Resale listing cancelled on-chain!");
     } catch (err: any) {
       console.error("Cancellation failed:", err);
-      alert(err.message || "Failed to cancel listing.");
+      if (err?.code === 4001 || err?.code === 'ACTION_REJECTED' || err?.info?.error?.code === 4001) return;
+      alert(err?.reason || err?.shortMessage || "Failed to cancel listing.");
     }
   };
 
@@ -221,9 +226,55 @@ export const MyTickets: React.FC = () => {
                         className="w-full h-full object-contain"
                       />
                     </div>
-                    <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
-                      {ticket.tierPrice} ETH
-                    </p>
+
+                    {/* Resale Analytics Panel */}
+                    {ticket.status === 'resale' && ticket.resalePrice != null ? (() => {
+                      const buyPrice = ticket.tierPrice;
+                      const salePrice = ticket.resalePrice;
+                      const diff = salePrice - buyPrice;
+                      const pctChange = buyPrice > 0 ? ((diff / buyPrice) * 100) : 0;
+                      const isProfit = diff >= 0;
+
+                      return (
+                        <div className="w-full min-w-[220px] p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                          {/* Price comparison */}
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-center">
+                              <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-1">Bought</p>
+                              <p className="text-sm font-black text-white/60">{buyPrice} ETH</p>
+                            </div>
+                            <ArrowRight size={14} className="text-white/20 shrink-0" />
+                            <div className="text-center">
+                              <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-1">Listed</p>
+                              <p className="text-sm font-black text-[var(--accent-teal)]">{salePrice} ETH</p>
+                            </div>
+                          </div>
+
+                          {/* Gain/Loss indicator */}
+                          <div className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl ${
+                            isProfit 
+                              ? 'bg-[var(--status-success)]/10 border border-[var(--status-success)]/20' 
+                              : 'bg-red-500/10 border border-red-500/20'
+                          }`}>
+                            {isProfit 
+                              ? <TrendingUp size={14} className="text-[var(--status-success)]" />
+                              : <TrendingDown size={14} className="text-red-400" />
+                            }
+                            <span className={`text-[10px] font-black uppercase tracking-widest ${
+                              isProfit ? 'text-[var(--status-success)]' : 'text-red-400'
+                            }`}>
+                              {isProfit ? '+' : ''}{diff.toFixed(4)} ETH ({isProfit ? '+' : ''}{pctChange.toFixed(1)}%)
+                            </span>
+                          </div>
+
+                          <p className="text-[8px] text-center font-bold text-white/20 uppercase tracking-widest italic">Listed on Marketplace</p>
+                        </div>
+                      );
+                    })() : (
+                      <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
+                        {ticket.tierPrice} ETH
+                      </p>
+                    )}
 
                     <div className="flex flex-col gap-2">
                       {activeResaleId === ticket.id ? (

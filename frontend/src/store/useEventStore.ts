@@ -29,6 +29,7 @@ export interface Event {
   status: 'active' | 'past';
   imageUrl?: string;
   tiers: TicketTier[];
+  basePriceWei?: string; // Raw price from contract (used for actual purchases)
 }
 
 interface EventState {
@@ -107,6 +108,74 @@ export const useEventStore = create<EventState>((set) => ({
             const eventDate = new Date(date);
             const isExpired = eventDate < new Date();
 
+            // --- Robust tier extraction ---
+            // The tier JSON is always the LAST segment in the packed name
+            // and always starts with '['. If the description contained '|||',
+            // the simple nameParts[5] approach fails, so we search backwards.
+            let tiersRaw = '';
+            if (nameParts.length > 5) {
+              // Search from the end for a segment that looks like a JSON array
+              for (let j = nameParts.length - 1; j >= 5; j--) {
+                const candidate = nameParts[j].trim();
+                if (candidate.startsWith('[')) {
+                  // If the JSON was split by ||| inside it (very unlikely),
+                  // rejoin everything from this index onward
+                  tiersRaw = nameParts.slice(j).join('|||');
+                  break;
+                }
+              }
+              // If no segment starts with '[', try the 6th segment as-is (legacy)
+              if (!tiersRaw) {
+                tiersRaw = nameParts[5] || '';
+              }
+            }
+
+            // Decode tiers from packed metadata
+            let tiers: { id: string; name: string; price: number; supply: number; sold: number }[] = [];
+            if (tiersRaw) {
+              try {
+                const parsed = JSON.parse(tiersRaw);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  // Distribute the total ticketsSold proportionally across tiers
+                  const totalSupply = parsed.reduce((a: number, t: any) => a + (Number(t.s) || 0), 0);
+                  const totalSold = Number(evt.ticketsSold || evt[3]);
+                  
+                  tiers = parsed.map((t: any, i: number) => {
+                    const tierSupply = Number(t.s) || 0;
+                    // Proportional sold distribution (best effort since contract tracks total only)
+                    const tierSold = totalSupply > 0 
+                      ? Math.min(tierSupply, Math.round((tierSupply / totalSupply) * totalSold))
+                      : 0;
+                    return {
+                      id: `tier_evt_${eventId.toString()}_${i}`,
+                      name: t.n || `Tier ${i + 1}`,
+                      price: Number(t.p) || 0,
+                      supply: tierSupply,
+                      sold: tierSold,
+                    };
+                  });
+                  console.log(`Event ${eventId}: decoded ${tiers.length} tier(s) from chain:`, tiers.map(t => t.name));
+                }
+              } catch (e) {
+                console.warn(`Event ${eventId}: tier JSON parse failed for:`, tiersRaw, e);
+              }
+            }
+
+            // Fallback: single tier from contract data
+            if (tiers.length === 0) {
+              console.warn(`Event ${eventId}: no tier data found in name field, using General Access fallback. Raw name:`, rawName);
+              tiers = [{
+                id: `tier_evt_${eventId.toString()}`,
+                name: 'General Access',
+                price: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
+                supply: Number(evt.maxTickets || evt[1]),
+                sold: Number(evt.ticketsSold || evt[3])
+              }];
+            }
+
+            // Store contract's base price for purchases (contract only supports one price)
+            const basePriceWei = (evt.priceWei || evt[2]).toString();
+
             loadedEvents.push({
               id: `evt_${eventId.toString()}`,
               title,
@@ -117,15 +186,8 @@ export const useEventStore = create<EventState>((set) => ({
               organizerId: evt.organiser || evt[4],
               royaltyBps: Number(evt.royaltyBps || evt[5]),
               status: isExpired ? 'past' : 'active',
-              tiers: [
-                {
-                  id: `tier_evt_${eventId.toString()}`,
-                  name: 'General Access',
-                  price: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
-                  supply: Number(evt.maxTickets || evt[1]),
-                  sold: Number(evt.ticketsSold || evt[3])
-                }
-              ]
+              tiers,
+              basePriceWei,
             });
           }
         } catch (e) {

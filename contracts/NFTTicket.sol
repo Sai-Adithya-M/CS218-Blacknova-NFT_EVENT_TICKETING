@@ -62,7 +62,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     function buyTicket(uint eventId) public payable nonReentrant {
         Event storage evt = events[eventId];
         require(evt.exists, "Event does not exist");
-        require(msg.value == evt.priceWei, "Incorrect ETH amount");
+        require(msg.value >= evt.priceWei, "Insufficient ETH amount");
         require(evt.ticketsSold < evt.maxTickets, "Sold out");
 
         uint tokenId = nextTokenId;
