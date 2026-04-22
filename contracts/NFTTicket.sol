@@ -42,6 +42,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     function createEvent(string memory ipfsHash, uint32 maxTickets, uint256 priceWei, uint8 royaltyBps) external {
         require(maxTickets > 0, "Must have tickets");
         require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
+        require(priceWei > 0, "Price must be greater than zero");
         require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
 
         events[nextEventId] = Event({
@@ -57,10 +58,9 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         nextEventId++;
     }
 
-    function buyTicket(uint eventId) public payable nonReentrant {
+    function buyTicket(uint eventId) external payable nonReentrant {
         Event storage evt = events[eventId];
         require(evt.ticketsSold < evt.maxTickets, "Sold out");
-        require(msg.sender != evt.organiser,"Organiser cannot buy ticket");
         require(evt.exists, "Event does not exist");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
         require(msg.value == evt.priceWei, "Incorrect ETH amount");
@@ -81,7 +81,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- Marketplace Functions ---
-    function listForResale(uint tokenId, uint256 priceWei) public {
+    function listForResale(uint tokenId, uint256 priceWei) external {
         require(ownerOf(tokenId) == msg.sender, "Not the owner");
         require(priceWei > 0, "Price must be > 0");
 
@@ -94,7 +94,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         emit TicketListed(tokenId, msg.sender, priceWei);
     }
 
-    function buyResaleTicket(uint tokenId) public payable nonReentrant {
+    function buyResaleTicket(uint tokenId) external payable nonReentrant {
         ResaleListing memory listing = resaleListings[tokenId];
         require(listing.active, "Not for sale");
         
@@ -122,7 +122,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         emit TicketResold(tokenId, listing.seller, msg.sender, msg.value);
     }
 
-    function cancelResaleListing(uint tokenId) public {
+    function cancelResaleListing(uint tokenId) external {
         ResaleListing storage listing = resaleListings[tokenId];
 
         require(listing.active, "No active listing");

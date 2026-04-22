@@ -103,7 +103,8 @@ export const useEventStore = create<EventState>((set) => ({
           if (evt.exists || evt[4]) {
             let title = "Unknown Event";
             let location = "Unknown Location";
-            let date = new Date().toISOString();
+            // Default to a future date so events with failed metadata don't appear as 'past'
+            let date = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
             let description = "No description available.";
             let category = "Uncategorized";
             let hasIpfsError = false;
@@ -117,7 +118,7 @@ export const useEventStore = create<EventState>((set) => ({
                 try {
                   const url = `${gateway}/${cid}`;
                   const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 6000);
+                  const timeoutId = setTimeout(() => controller.abort(), 10000);
                   const res = await fetch(url, { signal: controller.signal });
                   clearTimeout(timeoutId);
 
@@ -146,7 +147,8 @@ export const useEventStore = create<EventState>((set) => ({
             }
 
             const eventDate = new Date(date);
-            const isExpired = eventDate < new Date();
+            // If IPFS failed, always treat as active so the event remains visible
+            const isExpired = hasIpfsError ? false : eventDate < new Date();
 
             return {
               id: `evt_${eventId.toString()}`,

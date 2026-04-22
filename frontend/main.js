@@ -10,7 +10,7 @@ import contractABI from './contracts/NFTTicket.json';
 // CONFIGURATION
 // ============================
 // TODO: Replace with your deployed contract address
-const CONTRACT_ADDRESS = '0x74eFFE12e70e99e4CC9D2703433eFcF87A35BdE3';
+const CONTRACT_ADDRESS = '0x6A0d38216cB1bc9cEC83683D8EcBEE4A45684b6c';
 
 // Supported chain IDs
 const SUPPORTED_CHAINS = {
@@ -171,7 +171,7 @@ async function refreshDashboard() {
   const allEvents = await loadEvents();
   const account = getCurrentAccount();
   const myEvents = allEvents.filter(evt => account && evt.organiser.toLowerCase() === account.toLowerCase());
-  
+
   // Reuse renderEvents but pass a flag to style them as dashboard cards
   renderEvents(myEvents, container, true);
   loadedTabs.dashboard = true;
@@ -270,13 +270,13 @@ async function handleConnect() {
 function handleLogout() {
   if (getCurrentAccount()) {
     disconnectWallet();
-    
+
     // Clear cache upon manual logout
     loadedTabs.events = false;
     loadedTabs.tickets = false;
     loadedTabs.marketplace = false;
     loadedTabs.dashboard = false;
-    
+
     updateWalletUI(null);
     showToast('Logged out successfully', 'info');
   }
@@ -341,7 +341,7 @@ async function init() {
       loadedTabs.tickets = false;
       loadedTabs.marketplace = false;
       loadedTabs.dashboard = false;
-      
+
       updateWalletUI(account);
       if (account) updateNetworkInfo();
     },
