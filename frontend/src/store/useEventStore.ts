@@ -75,25 +75,21 @@ export const useEventStore = create<EventState>((set) => ({
 
     set({ isLoading: true });
     try {
-      console.log("Starting reliable blockchain sync from block:", config.deploymentBlock);
+      console.log("Starting reliable blockchain sync using nextEventId...");
       const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
 
-      const filter = contract.filters.EventCreated();
-      const eventLogs = await contract.queryFilter(filter, config.deploymentBlock, "latest");
-      
-      console.log(`Found ${eventLogs.length} events on-chain.`);
+      // Use nextEventId to get the total count instead of logs
+      const nextId = await contract.nextEventId();
+      const count = Number(nextId);
+      console.log(`Contract reports ${count} total events.`);
 
       const loadedEvents: Event[] = [];
 
-      for (const log of eventLogs) {
+      // Iterate from 1 to nextId (usually starts at 1)
+      for (let i = 1; i < count; i++) {
         try {
-          const parsedLog = contract.interface.parseLog(log as any);
-          const eventId = parsedLog?.args?.eventId || (log as any).args?.[0];
-          
-          if (!eventId) continue;
-
-          const evt = await contract.fetchEventData(eventId);
+          const evt = await contract.fetchEventData(i);
           
           if (evt.exists || evt[6]) {
             const rawName = evt.name || evt[0];
@@ -110,7 +106,7 @@ export const useEventStore = create<EventState>((set) => ({
             const isExpired = eventDate < new Date();
 
             loadedEvents.push({
-              id: `evt_${eventId.toString()}`,
+              id: `evt_${i}`,
               title,
               description,
               date,
@@ -122,7 +118,7 @@ export const useEventStore = create<EventState>((set) => ({
               imageUrl: imageCid ? ipfsToHttpUrl(imageCid) : undefined,
               tiers: [
                 {
-                  id: `tier_evt_${eventId.toString()}`,
+                  id: `tier_evt_${i}`,
                   name: 'General Access',
                   price: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
                   supply: Number(evt.maxTickets || evt[1]),
@@ -132,7 +128,7 @@ export const useEventStore = create<EventState>((set) => ({
             });
           }
         } catch (e) {
-          console.error(`Sync error for log:`, e);
+          console.error(`Sync error for event ID ${i}:`, e);
         }
       }
 
