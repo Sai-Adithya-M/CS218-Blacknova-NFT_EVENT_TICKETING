@@ -8,7 +8,8 @@ const ABI = [
   "function tokenToEvent(uint256 tokenId) public view returns (uint)",
   "function fetchEventData(uint eventId) public view returns (tuple(uint32 maxTickets, uint256 priceWei, uint32 ticketsSold, uint8 royaltyBps, bool exists, address organiser))",
   "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
-  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+  "event TicketListed(uint indexed tokenId, address indexed seller, uint256 priceWei)"
 ];
 
 export type TicketStatus = 'active' | 'used' | 'expired' | 'resale';
@@ -143,10 +144,46 @@ export const useTicketStore = create<TicketState>((set) => ({
         }
       }
 
-      // 5. Also fetch any active resale listings that might not be owned by the user 
-      // but were created by them (though standard resale transfers the NFT to the contract or marketplace escrow)
-      // Actually, based on NFTTicket.sol, the seller remains the owner until sold or it's held by the contract.
-      // We already handled user-owned resale above.
+      // 5. Fetch ALL active resale listings globally (for the secondary market)
+      const listedFilter = contract.filters.TicketListed();
+      const listedLogs = await contract.queryFilter(listedFilter, config.deploymentBlock, "latest");
+      
+      const listedTokenIds = new Set<string>();
+      listedLogs.forEach((log: any) => {
+        const tokenId = log.args?.[0]?.toString();
+        if (tokenId) listedTokenIds.add(tokenId);
+      });
+
+      for (const tokenId of listedTokenIds) {
+        // Skip if we already processed it as a user-owned token
+        if (ownedTokenIds.has(tokenId)) continue;
+
+        try {
+          const listing = await contract.getResaleListing(tokenId);
+          const isActive = listing.active || listing[2];
+          
+          if (isActive) {
+            const currentOwner = await contract.ownerOf(tokenId);
+            const eventId = await contract.tokenToEvent(tokenId);
+            const evt = await contract.fetchEventData(eventId);
+
+            loadedTickets.push({
+              id: `tkt_${tokenId}`,
+              tokenId: tokenId,
+              txHash: '', 
+              eventId: `evt_${eventId}`,
+              ownerId: currentOwner,
+              tierName: 'General Access',
+              tierPrice: parseFloat(ethers.formatEther(evt.priceWei || evt[1])),
+              status: 'resale',
+              purchasedAt: new Date().toISOString(), 
+              resalePrice: parseFloat(ethers.formatEther(listing.priceWei || listing[1])),
+            });
+          }
+        } catch (e) {
+          console.error(`Error loading resale metadata for token ${tokenId}:`, e);
+        }
+      }
 
       set({ tickets: loadedTickets, isLoading: false });
       console.log("Ticket sync complete. Total displayed:", loadedTickets.length);
