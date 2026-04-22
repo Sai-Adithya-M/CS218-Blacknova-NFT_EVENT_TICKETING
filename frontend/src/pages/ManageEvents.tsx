@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
 
-import { uploadJSONToIPFS } from '../utils/ipfs';
+import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function createEvent(string memory ipfsHash, uint32 maxTickets, uint256 priceWei, uint8 royaltyBps) external",
@@ -51,6 +51,26 @@ export const ManageEvents: React.FC = () => {
 
   const addTier = () => {
     setTiers([...tiers, { name: '', price: '', supply: '50' }]);
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removeImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const removeTier = (index: number) => {
@@ -115,12 +135,23 @@ export const ManageEvents: React.FC = () => {
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
       const royaltyBps = Math.floor(parseFloat(formData.royalty || '0'));
 
+      let imageUrl = '';
+      if (imageFile) {
+        try {
+          const imageHash = await uploadToIPFS(imageFile);
+          imageUrl = `ipfs://${imageHash}`;
+        } catch (err: any) {
+          throw new Error("Failed to upload image to IPFS: " + err.message);
+        }
+      }
+
       const metadataJSON = {
         name: formData.title || 'Event',
         location: formData.location || '',
         date: formData.date || new Date().toISOString(),
         description: formData.description || '',
-        category: formData.category || 'Music & Concerts'
+        category: formData.category || 'Music & Concerts',
+        image: imageUrl || undefined
       };
 
       // Upload to IPFS
@@ -170,6 +201,9 @@ export const ManageEvents: React.FC = () => {
       setIsCreating(false);
       setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts', royalty: '5' });
       setTiers([{ name: 'General', price: '', supply: '100' }]);
+      setImageFile(null);
+      setImagePreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
       setError(err.message || "Failed to create event.");
@@ -406,9 +440,37 @@ export const ManageEvents: React.FC = () => {
 
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Media Upload</h3>
-                  <div className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all">
-                    <Upload className="text-white/20" size={18} />
-                    <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image (Optional)</span>
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all relative overflow-hidden min-h-[160px]"
+                  >
+                    {imagePreview ? (
+                      <>
+                        <img src={imagePreview} alt="Preview" className="absolute inset-0 w-full h-full object-cover rounded-xl" />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeImage();
+                          }}
+                          className="absolute top-4 right-4 p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-all backdrop-blur-md z-10"
+                        >
+                          <XIcon size={16} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="text-white/20" size={24} />
+                        <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image (Optional)</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleImageChange}
+                      accept="image/*"
+                      className="hidden"
+                    />
                   </div>
                 </section>
 
