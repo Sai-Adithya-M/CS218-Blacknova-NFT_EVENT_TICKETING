@@ -1,18 +1,19 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck, ImageIcon, X as XIcon, Loader2 } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
 import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
-import { uploadToIPFS, ipfsToHttpUrl } from '../utils/ipfs';
+
+import { uploadJSONToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory name, uint maxTickets, uint priceWei, uint96 royaltyBps) public",
-  "event EventCreated(uint indexed eventId, address indexed organiser, string name)"
+  "function createEvent(string memory ipfsHash, uint32 maxTickets, uint256 priceWei, uint8 royaltyBps) external",
+  "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
 interface TierFormData {
@@ -26,11 +27,7 @@ export const ManageEvents: React.FC = () => {
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -79,22 +76,6 @@ export const ManageEvents: React.FC = () => {
 
     setIsMining(true);
     try {
-      // Step 1: Upload image to IPFS if one was selected
-      let imageCid = '';
-      if (imageFile) {
-        setIsUploading(true);
-        try {
-          imageCid = await uploadToIPFS(imageFile);
-          console.log('Image uploaded to IPFS:', imageCid);
-        } catch (uploadErr: any) {
-          console.error('IPFS upload failed:', uploadErr);
-          alert('Image upload to IPFS failed: ' + (uploadErr.message || 'Unknown error'));
-          setIsMining(false);
-          setIsUploading(false);
-          return;
-        }
-        setIsUploading(false);
-      }
       if (!(window as any).ethereum) throw new Error("MetaMask not found");
 
       const totalSupply = parsedTiers.reduce((acc, t) => acc + t.supply, 0);
@@ -108,7 +89,7 @@ export const ManageEvents: React.FC = () => {
         try {
           await (window as any).ethereum.request({
             method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0xaa36a7' }], 
+            params: [{ chainId: '0xaa36a7' }],
           });
         } catch (switchError) {
           throw new Error("Please switch your MetaMask network to Sepolia to continue.");
@@ -119,13 +100,28 @@ export const ManageEvents: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
-      const packedMetadata = `${formData.title}|||${formData.location}|||${formData.date}|||${formData.description}|||${formData.category}|||${imageCid}`;
-      const royaltyBps = Math.floor(parseFloat(formData.royalty || '0') * 100);
+      const royaltyBps = Math.floor(parseFloat(formData.royalty || '0'));
 
-      const tx = await contract.createEvent(packedMetadata, totalSupply, basePriceWei, royaltyBps);
+      const metadataJSON = {
+        name: formData.title || 'Event',
+        location: formData.location || '',
+        date: formData.date || new Date().toISOString(),
+        description: formData.description || '',
+        category: formData.category || 'Music & Concerts'
+      };
+
+      // Upload to IPFS
+      let ipfsHash = "";
+      try {
+        ipfsHash = await uploadJSONToIPFS(metadataJSON);
+      } catch (err: any) {
+        throw new Error("Failed to upload metadata to IPFS: " + err.message);
+      }
+
+      const tx = await contract.createEvent(ipfsHash, totalSupply, basePriceWei, royaltyBps);
       const receipt = await tx.wait();
 
-      let blockchainEventId = `evt_${Date.now()}`; 
+      let blockchainEventId = `evt_${Date.now()}`;
       if (receipt && receipt.logs) {
         try {
           const eventCreatedLog = receipt.logs.find((log: any) => {
@@ -155,15 +151,12 @@ export const ManageEvents: React.FC = () => {
         category: formData.category,
         organizerId: user.id,
         royaltyBps: royaltyBps,
-        imageUrl: imageCid ? ipfsToHttpUrl(imageCid) : undefined,
         tiers: parsedTiers,
       });
 
       setIsCreating(false);
       setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts', royalty: '5' });
       setTiers([{ name: 'General', price: '', supply: '100' }]);
-      setImageFile(null);
-      setImagePreview(null);
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
       alert(err.message || "Failed to create event.");
@@ -380,61 +373,19 @@ export const ManageEvents: React.FC = () => {
                 </section>
 
                 <section className="space-y-4">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Event Banner (IPFS)</h3>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setImageFile(file);
-                        const reader = new FileReader();
-                        reader.onload = () => setImagePreview(reader.result as string);
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                  />
-                  {imagePreview ? (
-                    <div className="relative rounded-xl overflow-hidden border border-white/10">
-                      <img src={imagePreview} alt="Preview" className="w-full h-48 object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                      <div className="absolute bottom-3 left-3 flex items-center gap-2">
-                        <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest border border-[var(--accent-teal)]/30 flex items-center gap-1.5">
-                          <ImageIcon size={10} />
-                          {imageFile?.name}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setImageFile(null); setImagePreview(null); }}
-                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white/60 hover:text-white hover:bg-red-500/40 transition-all"
-                      >
-                        <XIcon size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      className="p-8 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-white/[0.04] hover:border-[var(--accent-teal)]/30 transition-all group"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-[var(--accent-teal)]/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <Upload className="text-[var(--accent-teal)]" size={20} />
-                      </div>
-                      <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Click to upload banner image</span>
-                      <span className="text-[9px] text-white/15 font-medium">Stored permanently on IPFS via Pinata</span>
-                    </div>
-                  )}
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Media Upload</h3>
+                  <div className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all">
+                    <Upload className="text-white/20" size={18} />
+                    <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image (Optional)</span>
+                  </div>
                 </section>
 
                 <button
                   type="submit"
-                  disabled={isMining || isUploading}
-                  className="w-full py-4 rounded-xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:shadow-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  disabled={isMining}
+                  className="w-full py-4 rounded-xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs shadow-lg hover:shadow-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isUploading && <Loader2 size={14} className="animate-spin" />}
-                  {isUploading ? 'Uploading Image to IPFS...' : isMining ? 'Minting on Blockchain...' : 'Create Event'}
+                  {isMining ? 'Minting on Blockchain...' : 'Create Event'}
                 </button>
               </form>
             </div>
@@ -468,21 +419,19 @@ export const ManageEvents: React.FC = () => {
             <div className="flex p-1.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl">
               <button
                 onClick={() => setManageTab('active')}
-                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  manageTab === 'active' 
-                    ? 'bg-white text-black shadow-2xl' 
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${manageTab === 'active'
+                    ? 'bg-white text-black shadow-2xl'
                     : 'text-white/40 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 Active Events
               </button>
               <button
                 onClick={() => setManageTab('history')}
-                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  manageTab === 'history' 
-                    ? 'bg-white text-black shadow-2xl' 
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${manageTab === 'history'
+                    ? 'bg-white text-black shadow-2xl'
                     : 'text-white/40 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 Past History
               </button>
@@ -510,45 +459,45 @@ export const ManageEvents: React.FC = () => {
                     return manageTab === 'active' ? !isPast : isPast;
                   })
                   .map(event => (
-                  <div key={event.id} className="space-y-4">
-                    <EventCard event={event} showEtherscan={true} />
-                    <div className="glass-panel p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic">
-                          <ShieldCheck size={14} />
-                          On-Chain Metadata
+                    <div key={event.id} className="space-y-4">
+                      <EventCard event={event} showEtherscan={true} />
+                      <div className="glass-panel p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic">
+                            <ShieldCheck size={14} />
+                            On-Chain Metadata
+                          </div>
                         </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-3 rounded-xl bg-black/40 border border-white/5">
-                          <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                            <Hash size={8} /> Event ID
-                          </p>
-                          <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
-                        </div>
-                        <div className="p-3 rounded-xl bg-black/40 border border-white/5">
-                          <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                            <ShieldCheck size={8} /> Contract
-                          </p>
-                          <div className="flex items-center justify-between">
-                            <code className="text-[10px] font-mono font-bold text-white/60">
-                              {config.contractAddress.slice(0, 6)}...
-                            </code>
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(config.contractAddress);
-                                alert("Copied!");
-                              }}
-                              className="p-1 rounded bg-white/5 text-white/30"
-                            >
-                              <Copy size={10} />
-                            </button>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-3 rounded-xl bg-black/40 border border-white/5">
+                            <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
+                              <Hash size={8} /> Event ID
+                            </p>
+                            <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
+                          </div>
+                          <div className="p-3 rounded-xl bg-black/40 border border-white/5">
+                            <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
+                              <ShieldCheck size={8} /> Contract
+                            </p>
+                            <div className="flex items-center justify-between">
+                              <code className="text-[10px] font-mono font-bold text-white/60">
+                                {config.contractAddress.slice(0, 6)}...
+                              </code>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(config.contractAddress);
+                                  alert("Copied!");
+                                }}
+                                className="p-1 rounded bg-white/5 text-white/30"
+                              >
+                                <Copy size={10} />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             ) : (
               <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-dashed border-white/10 text-center p-8">
@@ -557,8 +506,8 @@ export const ManageEvents: React.FC = () => {
                   {manageTab === 'active' ? 'No Active Events' : 'No Past Events'}
                 </p>
                 <p className="text-sm text-white/20">
-                  {manageTab === 'active' 
-                    ? 'Click "Create New Event" to launch your first experience.' 
+                  {manageTab === 'active'
+                    ? 'Click "Create New Event" to launch your first experience.'
                     : 'Your concluded events will show up here as historical records.'}
                 </p>
               </div>

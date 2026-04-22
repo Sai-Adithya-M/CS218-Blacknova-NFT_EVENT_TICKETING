@@ -10,7 +10,7 @@ import { showToast, showLoading, hideLoading } from '../main.js';
 export async function createEvent(name, maxTickets, priceEth, royaltyPercent) {
   const contract = await getContract();
   const priceWei = ethers.parseEther(priceEth);
-  const royaltyBps = Math.round(royaltyPercent * 100); // e.g., 5% -> 500 bps
+  const royaltyBps = Math.round(royaltyPercent);
 
   showLoading('Creating event on blockchain...');
   try {
@@ -125,7 +125,7 @@ export function renderEvents(events, container) {
         </div>
         <div class="card-stat">
           <span class="stat-label">Royalty</span>
-          <span class="stat-value">${evt.royaltyBps / 100}%</span>
+          <span class="stat-value">${evt.royaltyBps}%</span>
         </div>
         <div class="progress-bar">
           <div class="progress-fill" style="width: ${progress}%"></div>

@@ -12,19 +12,17 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     uint public nextTokenId = 1;
 
     struct Event {
-        bytes16 name;
         uint32 maxTickets;
-        uint48 priceWei;
+        uint256 priceWei;
         uint32 ticketsSold;
         uint8 royaltyBps; // e.g., 500 = 5%
         bool exists;
-
         address organiser;
     }
 
     struct ResaleListing {
         address seller;
-        uint48 priceWei;
+        uint256 priceWei;
         bool active;
     }
 
@@ -32,31 +30,30 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint => uint) public tokenToEvent;
     mapping(uint => ResaleListing) public resaleListings;
 
-    event EventCreated(uint indexed eventId, address indexed organiser, bytes16 name);
+    event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash);
     event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer);
-    event TicketListed(uint indexed tokenId, address indexed seller, uint48 priceWei);
-    event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei);
+    event TicketListed(uint indexed tokenId, address indexed seller, uint256 priceWei);
+    event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei);
     event ListingCancelled(uint indexed tokenId);
 
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(bytes16 name, uint32 maxTickets, uint48 priceWei, uint8 royaltyBps) external {
+    function createEvent(string memory ipfsHash, uint32 maxTickets, uint256 priceWei, uint8 royaltyBps) external {
         require(maxTickets > 0, "Must have tickets");
-        require(name != bytes16(0), "Name cannot be empty");
+        require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
         require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
 
         events[nextEventId] = Event({
-            name: name,
             maxTickets: maxTickets,
             priceWei: priceWei,
             ticketsSold: 0,
-            organiser: msg.sender,
             royaltyBps: royaltyBps,
-            exists: true
+            exists: true,
+            organiser: msg.sender
         });
 
-        emit EventCreated(nextEventId, msg.sender, name);
+        emit EventCreated(nextEventId, msg.sender, ipfsHash);
         nextEventId++;
     }
 
@@ -84,7 +81,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- Marketplace Functions ---
-    function listForResale(uint tokenId, uint48 priceWei) public {
+    function listForResale(uint tokenId, uint256 priceWei) public {
         require(ownerOf(tokenId) == msg.sender, "Not the owner");
         require(priceWei > 0, "Price must be > 0");
 
@@ -108,7 +105,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
 
         (address organiser, uint256 royaltyAmount) = royaltyInfo(tokenId, msg.value);
-        uint48 sellerProceeds = uint48(msg.value) - uint48(royaltyAmount);
+        uint256 sellerProceeds = msg.value - royaltyAmount;
 
         delete resaleListings[tokenId]; // Prevent reentrancy
 
@@ -122,7 +119,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         (bool successSeller, ) = payable(listing.seller).call{value: sellerProceeds}("");
         require(successSeller, "Seller transfer failed");
 
-        emit TicketResold(tokenId, listing.seller, msg.sender, uint48(msg.value));
+        emit TicketResold(tokenId, listing.seller, msg.sender, msg.value);
     }
 
     function cancelResaleListing(uint tokenId) public {
