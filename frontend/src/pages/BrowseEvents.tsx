@@ -16,7 +16,6 @@ export const BrowseEvents: React.FC = () => {
     category: 'All',
     minPrice: '',
     maxPrice: '',
-    verifiedOnly: false,
   });
 
   const filteredEvents = useMemo(() => {
@@ -54,12 +53,6 @@ export const BrowseEvents: React.FC = () => {
         return false;
       }
 
-      // Verification filter (assuming all are verified for now as per UI, or can add logic here)
-      if (filters.verifiedOnly) {
-        // Since EventCard shows "Verified Event" for all, we can just keep them.
-        // If there was a real verified flag, we'd check it here.
-      }
-
       return true;
     });
   }, [events, filters]);
@@ -80,11 +73,10 @@ export const BrowseEvents: React.FC = () => {
       category: 'All',
       minPrice: '',
       maxPrice: '',
-      verifiedOnly: false,
     });
   };
 
-  const hasActiveFilters = filters.search || filters.category !== 'All' || filters.minPrice || filters.maxPrice || filters.verifiedOnly;
+  const hasActiveFilters = filters.search || filters.category !== 'All' || filters.minPrice || filters.maxPrice;
 
   return (
     <motion.div

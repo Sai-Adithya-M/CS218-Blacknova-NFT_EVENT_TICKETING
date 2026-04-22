@@ -70,7 +70,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   if (!isOpen || !event) return null;
 
   const date = new Date(event.date);
-  const isOrganizer = user?.id === event.organizerId;
+  const isOrganizer = user?.id?.toLowerCase() === event.organizerId?.toLowerCase();
 
   const handleClose = () => {
     setStep('details');
@@ -86,6 +86,12 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
     }
 
     if (!selectedTier) return;
+
+    if (isOrganizer) {
+      setErrorMsg("Organisers cannot purchase tickets for their own events.");
+      setStep('error');
+      return;
+    }
 
     const remaining = selectedTier.supply - selectedTier.sold;
     if (quantity > remaining) {
@@ -164,6 +170,12 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const handleBuyResale = async () => {
     if (!isAuthenticated || !user) {
       setIsLoginOpen(true);
+      return;
+    }
+
+    if (isOrganizer) {
+      setErrorMsg("Organisers cannot purchase tickets for their own events.");
+      setStep('error');
       return;
     }
 
@@ -385,11 +397,19 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                           <div className="space-y-3">
                             {Object.entries(
                               resaleTickets.reduce((acc, t) => {
-                                if (!acc[t.tierName]) acc[t.tierName] = { count: 0, minPrice: Infinity, example: t };
+                                if (!acc[t.tierName]) {
+                                  const tier = event.tiers.find(tr => tr.name === t.tierName);
+                                  acc[t.tierName] = { 
+                                    count: 0, 
+                                    minPrice: Infinity, 
+                                    originalPrice: tier ? tier.price : 0,
+                                    example: t 
+                                  };
+                                }
                                 acc[t.tierName].count++;
                                 acc[t.tierName].minPrice = Math.min(acc[t.tierName].minPrice, t.resalePrice || Infinity);
                                 return acc;
-                              }, {} as Record<string, { count: number, minPrice: number, example: any }>)
+                              }, {} as Record<string, { count: number, minPrice: number, originalPrice: number, example: any }>)
                             ).map(([tierName, data]) => (
                               <button
                                 key={tierName}
@@ -403,15 +423,24 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                                     : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
                                 }`}
                               >
-                                <div>
-                                  <p className="font-black uppercase tracking-tight italic">{tierName}</p>
-                                  <p className="text-[11px] text-white/40 font-bold mt-0.5">
-                                    <Users size={10} className="inline mr-1" />
-                                    {data.count} listed for resale
-                                  </p>
+                                <div className="flex items-center gap-4">
+                                  <div className="flex flex-col">
+                                    <p className="font-black uppercase tracking-tight italic">{tierName}</p>
+                                    <div className="flex items-center gap-1.5 text-[9px] text-white/30 font-bold uppercase tracking-widest mt-1">
+                                      <span>Original</span>
+                                      <span className="line-through">{data.originalPrice} ETH</span>
+                                    </div>
+                                  </div>
+                                  <div className="w-px h-10 bg-white/10" />
+                                  <div className="flex-1">
+                                    <p className="text-[11px] text-white/40 font-bold">
+                                      <Users size={10} className="inline mr-1" />
+                                      {data.count} listed
+                                    </p>
+                                  </div>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-[9px] text-white/30 font-black uppercase mb-0.5">Starting At</p>
+                                  <p className="text-[9px] text-[var(--accent-teal)] font-black uppercase mb-0.5 tracking-widest">Resale From</p>
                                   <p className="text-xl font-black text-[var(--accent-teal)]">
                                     {data.minPrice} ETH
                                   </p>

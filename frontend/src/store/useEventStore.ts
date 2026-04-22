@@ -36,7 +36,7 @@ interface EventState {
   events: Event[];
   isLoading: boolean;
   createEvent: (event: Omit<Event, 'id' | 'status'> & { id?: string }) => void;
-  incrementTierSold: (eventId: string, tierId: string) => void;
+  incrementTierSold: (eventId: string, tierId: string, quantity?: number) => void;
   fetchEventsFromChain: () => Promise<void>;
 }
 

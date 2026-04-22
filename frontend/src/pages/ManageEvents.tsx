@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck, ImageIcon, X as XIcon, Loader2 } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck, ImageIcon, X as XIcon, Loader2, AlertCircle } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion } from 'framer-motion';
@@ -30,6 +30,7 @@ export const ManageEvents: React.FC = () => {
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
@@ -75,7 +76,16 @@ export const ManageEvents: React.FC = () => {
         sold: 0,
       }));
 
-    if (parsedTiers.length === 0) return;
+    setError(null);
+    if (parsedTiers.length === 0) {
+      setError("Please add at least one valid ticket tier.");
+      return;
+    }
+
+    if (parsedTiers.some(t => t.price <= 0)) {
+      setError("Ticket price must be greater than 0 ETH.");
+      return;
+    }
 
     setIsMining(true);
     try {
@@ -166,7 +176,7 @@ export const ManageEvents: React.FC = () => {
       setImagePreview(null);
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
-      alert(err.message || "Failed to create event.");
+      setError(err.message || "Failed to create event.");
     } finally {
       setIsMining(false);
     }
@@ -248,6 +258,16 @@ export const ManageEvents: React.FC = () => {
         <motion.div variants={itemVariants} className="max-w-[1100px] mx-auto">
           <div className="grid lg:grid-cols-[1fr_380px] gap-12 items-start">
             <div className="glass-panel p-8 rounded-3xl border border-white/10 backdrop-blur-xl bg-white/[0.03]">
+              {error && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold flex items-center gap-3"
+                >
+                  <AlertCircle size={16} />
+                  {error}
+                </motion.div>
+              )}
               <form onSubmit={handleSubmit} className="space-y-8">
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">1. Basic Info</h3>
@@ -301,16 +321,25 @@ export const ManageEvents: React.FC = () => {
                   <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="flex-1">
                       <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic mb-1">Secondary Market Royalty (%)</h4>
-                      <p className="text-[9px] text-white/30 font-medium">Earn a percentage of every future resale of your tickets.</p>
+                      <p className="text-[9px] text-white/30 font-medium">Whole numbers only (0-20%).</p>
                     </div>
                     <div className="w-24 relative">
                       <input
                         type="number"
                         min="0"
                         max="20"
-                        className="w-full bg-white/5 border border-white/10 rounded-lg py-2 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-bold text-white text-center"
+                        step="1"
+                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${
+                          (parseInt(formData.royalty) > 20 || parseInt(formData.royalty) < 0) ? 'border-red-500/50' : 'border-white/10 focus:border-[var(--accent-teal)]'
+                        }`}
                         value={formData.royalty}
-                        onChange={e => setFormData({ ...formData, royalty: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          // Allow empty or only integers
+                          if (val === '' || /^\d+$/.test(val)) {
+                            setFormData({ ...formData, royalty: val });
+                          }
+                        }}
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/20">%</span>
                     </div>
@@ -443,7 +472,7 @@ export const ManageEvents: React.FC = () => {
               <div className="glass-panel p-8 rounded-3xl border border-white/10 bg-white/[0.03]">
                 <h3 className="text-lg font-black uppercase italic tracking-tight mb-4">Launch on Web3</h3>
                 <p className="text-sm text-white/50 font-medium leading-relaxed mb-6">
-                  ERC-721 NFTs on Sepolia testnet.
+                  ERC-721 NFTs on Sepolia testnet. <span className="text-[var(--accent-teal)] block mt-2 text-[10px] font-bold uppercase italic">Note: Transactions typically take 10-20 seconds to confirm.</span>
                 </p>
                 <div className="space-y-3">
                   {[

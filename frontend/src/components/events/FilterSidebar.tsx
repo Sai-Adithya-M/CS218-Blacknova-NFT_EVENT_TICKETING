@@ -7,14 +7,12 @@ interface FilterSidebarProps {
     category: string;
     minPrice: string;
     maxPrice: string;
-    verifiedOnly: boolean;
   };
   setFilters: React.Dispatch<React.SetStateAction<{
     search: string;
     category: string;
     minPrice: string;
     maxPrice: string;
-    verifiedOnly: boolean;
   }>>;
 }
 
@@ -27,7 +25,6 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilter
       category: 'All',
       minPrice: '',
       maxPrice: '',
-      verifiedOnly: false,
     });
   };
 
@@ -84,25 +81,6 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilter
             className="bg-white/5 border border-[var(--border-glass)] rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)]/50 transition-all text-sm" 
           />
         </div>
-      </div>
-
-      {/* Status */}
-      <div className="space-y-4">
-        <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">Verification</h3>
-        <label className="flex items-center gap-3 cursor-pointer group">
-          <div 
-            onClick={() => setFilters(prev => ({ ...prev, verifiedOnly: !prev.verifiedOnly }))}
-            className={`w-6 h-6 rounded-md border-2 border-[var(--border-glass)] group-hover:border-[var(--accent-purple)] flex items-center justify-center transition-all ${filters.verifiedOnly ? 'border-[var(--accent-purple)] bg-[var(--accent-purple)]/10' : ''}`}
-          >
-            <div className={`w-3 h-3 rounded-sm bg-[var(--accent-purple)] transition-transform ${filters.verifiedOnly ? 'scale-100' : 'scale-0'}`} />
-          </div>
-          <span 
-            onClick={() => setFilters(prev => ({ ...prev, verifiedOnly: !prev.verifiedOnly }))}
-            className={`text-sm font-semibold transition-colors ${filters.verifiedOnly ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]'}`}
-          >
-            Verified Organizers Only
-          </span>
-        </label>
       </div>
 
       {/* Reset */}

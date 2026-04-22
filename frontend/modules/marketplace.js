@@ -12,22 +12,40 @@ export async function fetchData() {
   const nextTokenId = await contract.nextTokenId();
   const listings = [];
 
+  console.log('Fetching resale listings up to tokenId:', Number(nextTokenId));
+
   for (let i = 1; i < Number(nextTokenId); i++) {
     try {
       const listing = await contract.getResaleListing(i);
       if (listing.active) {
         const eventId = await contract.tokenToEvent(i);
         const evt = await contract.fetchEventData(eventId);
+        
+        console.log(`Listing #${i}:`, listing);
+
+        // Handle bytes16 name (convert hex to string)
+        let name = evt.name;
+        if (typeof name === 'string' && name.startsWith('0x')) {
+          try {
+             // Basic hex to utf8 conversion for bytes16
+             const bytes = ethers.toBeArray(name);
+             name = new TextDecoder().decode(bytes).replace(/\0/g, '');
+          } catch (e) {
+            console.warn('Failed to decode name:', name);
+          }
+        }
+
         listings.push({
           tokenId: i,
           seller: listing.seller,
-          priceWei: listing.priceWei,
-          eventName: evt.name,
+          priceWei: listing.priceWei ? listing.priceWei.toString() : "0",
+          originalPriceWei: evt.priceWei ? evt.priceWei.toString() : "0",
+          eventName: name,
           eventId: Number(eventId),
         });
       }
     } catch (err) {
-      // Skip
+      console.error(`Error loading listing ${i}:`, err);
     }
   }
 
@@ -40,9 +58,16 @@ export async function fetchData() {
 export async function buyResaleTicket(tokenId, priceWei) {
   const contract = await getContract();
 
+  console.log('Buying resale ticket:', { tokenId, priceWei });
+
+  if (!priceWei || priceWei === "") {
+    showToast('Error: Ticket price is missing or invalid', 'error');
+    return false;
+  }
+
   showLoading('Purchasing resale ticket...');
   try {
-    const tx = await contract.buyResaleTicket(tokenId, { value: priceWei });
+    const tx = await contract.buyResaleTicket(tokenId, { value: BigInt(priceWei) });
     showLoading('Waiting for confirmation...');
     await tx.wait();
     showToast('Resale ticket purchased! 🎉', 'success');
@@ -99,6 +124,7 @@ export function renderMarketplace(listings, container, onRefresh) {
 
   listings.forEach((listing) => {
     const priceEth = ethers.formatEther(listing.priceWei);
+    const originalPriceEth = ethers.formatEther(listing.originalPriceWei);
     const isSeller = account && listing.seller.toLowerCase() === account.toLowerCase();
 
     const card = document.createElement('div');
@@ -114,7 +140,11 @@ export function renderMarketplace(listings, container, onRefresh) {
           <span class="stat-value">#${listing.tokenId}</span>
         </div>
         <div class="card-stat">
-          <span class="stat-label">Price</span>
+          <span class="stat-label">Original Price</span>
+          <span class="stat-value">${originalPriceEth} ETH</span>
+        </div>
+        <div class="card-stat">
+          <span class="stat-label">Resale Price</span>
           <span class="stat-value price-highlight">${priceEth} ETH</span>
         </div>
         <div class="card-stat">

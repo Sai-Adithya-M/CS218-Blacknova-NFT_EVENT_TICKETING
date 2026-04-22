@@ -126,10 +126,12 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     function cancelResaleListing(uint tokenId) public {
-        require(resaleListings[tokenId].active, "No active listing");
-        require(resaleListings[tokenId].seller == msg.sender, "Not the seller");
+        ResaleListing storage listing = resaleListings[tokenId];
+
+        require(listing.active, "No active listing");
+        require(listing.seller == msg.sender, "Not the seller");
         
-        delete resaleListings[tokenId];
+        listing.active = false;
         emit ListingCancelled(tokenId);
     }
 

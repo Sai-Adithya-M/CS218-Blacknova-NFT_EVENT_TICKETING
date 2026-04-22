@@ -319,6 +319,22 @@ export const Home: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeEvents.map((event, i) => {
               const date = new Date(event.date);
+              
+              const extractCid = (url?: string): string | null => {
+                if (!url) return null;
+                // Match /ipfs/CID, ipfs://CID, or raw CID
+                const cidMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/) || 
+                                 url.match(/^ipfs:\/\/([a-zA-Z0-9]+)/) ||
+                                 (url.startsWith('Qm') || url.startsWith('ba') ? [null, url] : null);
+                return cidMatch ? cidMatch[1] : null;
+              };
+
+              const cid = extractCid(event.imageUrl);
+              // Use Pinata as primary for better reliability with many user CIDs
+              const currentImageSrc = cid 
+                ? `https://gateway.pinata.cloud/ipfs/${cid}` 
+                : (event.imageUrl || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80');
+
               return (
                 <motion.div
                   key={event.id}
@@ -331,19 +347,27 @@ export const Home: React.FC = () => {
                   className="rounded-2xl border border-white/8 bg-white/[0.02] overflow-hidden group cursor-pointer hover:border-white/20 hover:shadow-lg hover:shadow-[var(--accent-purple)]/10 transition-all"
                 >
                   <div className="h-44 bg-gradient-to-br from-[var(--accent-purple)]/20 to-[var(--accent-teal)]/10 relative overflow-hidden">
-                    {event.imageUrl ? (
-                      <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-white/5">
-                        <Ticket size={48} className="text-white/10" />
-                      </div>
-                    )}
+                    <img 
+                      src={currentImageSrc} 
+                      alt={event.title} 
+                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        if (cid && !target.src.includes('ipfs.io')) {
+                          target.src = `https://ipfs.io/ipfs/${cid}`;
+                        } else if (cid && !target.src.includes('dweb.link')) {
+                          target.src = `https://dweb.link/ipfs/${cid}`;
+                        } else {
+                          target.src = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
+                        }
+                      }}
+                    />
                     <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] border border-white/10">
                       NFT
                     </div>
                   </div>
                   <div className="p-5">
-                    <h3 className="font-black uppercase tracking-tight italic mb-2">{event.title}</h3>
+                    <h3 className="font-black tracking-tight italic mb-2">{event.title}</h3>
                     <div className="flex items-center gap-1.5 text-[11px] text-white/40 font-bold mb-4">
                       <Calendar size={11} />{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       <span className="mx-1">·</span>

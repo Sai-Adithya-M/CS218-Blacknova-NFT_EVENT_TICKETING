@@ -20,18 +20,20 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
 
   const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
 
-  // Extract CID from the imageUrl if it's an IPFS gateway URL
+  // Robust CID extraction
   const extractCid = (url?: string): string | null => {
     if (!url) return null;
-    const match = url.match(/\/ipfs\/(.+)$/);
-    return match ? match[1] : null;
+    const cidMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/) || 
+                     url.match(/^ipfs:\/\/([a-zA-Z0-9]+)/) ||
+                     (url.startsWith('Qm') || url.startsWith('ba') ? [null, url] : null);
+    return cidMatch ? cidMatch[1] : null;
   };
 
   const cid = extractCid(event.imageUrl);
   const gateways = [
+    'https://ipfs.io/ipfs',
     'https://cloudflare-ipfs.com/ipfs',
     'https://dweb.link/ipfs',
-    'https://ipfs.io/ipfs',
     'https://gateway.pinata.cloud/ipfs',
   ];
 

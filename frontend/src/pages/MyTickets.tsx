@@ -2,7 +2,7 @@ import React from 'react';
 import { useTicketStore } from '../store/useTicketStore';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag } from 'lucide-react';
+import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, Loader2 } from 'lucide-react';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
@@ -20,6 +20,7 @@ export const MyTickets: React.FC = () => {
   const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
   const [activeResaleId, setActiveResaleId] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<'active' | 'history'>('active');
+  const [processingId, setProcessingId] = React.useState<string | null>(null);
 
   if (!user) return <AuthFallback />;
 
@@ -42,6 +43,7 @@ export const MyTickets: React.FC = () => {
       return;
     }
 
+    setProcessingId(ticket.id);
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
@@ -58,14 +60,16 @@ export const MyTickets: React.FC = () => {
         delete next[ticket.id];
         return next;
       });
-      alert("Ticket listed for resale on-chain!");
     } catch (err: any) {
       console.error("Resale listing failed:", err);
       alert(err.message || "Failed to list for resale.");
+    } finally {
+      setProcessingId(null);
     }
   };
 
   const handleCancelResale = async (ticket: any) => {
+    setProcessingId(ticket.id);
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
@@ -75,10 +79,11 @@ export const MyTickets: React.FC = () => {
       await tx.wait();
 
       cancelResale(ticket.id);
-      alert("Resale listing cancelled on-chain!");
     } catch (err: any) {
       console.error("Cancellation failed:", err);
       alert(err.message || "Failed to cancel listing.");
+    } finally {
+      setProcessingId(null);
     }
   };
 
@@ -182,7 +187,7 @@ export const MyTickets: React.FC = () => {
                         </span>
                       </div>
 
-                      <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">{eventTitle}</h3>
+                      <h3 className="text-xl font-black tracking-tight italic mb-3">{eventTitle}</h3>
 
                       {/* Token ID */}
                       <div className="flex items-center gap-2 mb-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
@@ -221,9 +226,27 @@ export const MyTickets: React.FC = () => {
                         className="w-full h-full object-contain"
                       />
                     </div>
-                    <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
-                      {ticket.tierPrice} ETH
-                    </p>
+                    <div className="flex flex-col items-end">
+                      {ticket.status === 'resale' && ticket.resalePrice ? (
+                        <div className="flex items-center gap-4 text-right">
+                          <div className="flex flex-col">
+                            <span className="text-[8px] font-black uppercase tracking-widest text-white/20">Original</span>
+                            <span className="text-sm font-bold text-white/30 line-through">{ticket.tierPrice} ETH</span>
+                          </div>
+                          <div className="w-px h-8 bg-white/10" />
+                          <div className="flex flex-col">
+                            <span className="text-[8px] font-black uppercase tracking-widest text-[var(--accent-teal)]">Resale Price</span>
+                            <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
+                              {ticket.resalePrice} ETH
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
+                          {ticket.tierPrice} ETH
+                        </p>
+                      )}
+                    </div>
 
                     <div className="flex flex-col gap-2">
                       {activeResaleId === ticket.id ? (
@@ -239,13 +262,16 @@ export const MyTickets: React.FC = () => {
                           />
                           <button
                             onClick={() => handleResale(ticket)}
-                            className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)] text-black text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all"
+                            disabled={processingId === ticket.id}
+                            className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)] text-black text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                           >
-                            List
+                            {processingId === ticket.id ? <Loader2 size={10} className="animate-spin" /> : null}
+                            {processingId === ticket.id ? 'Processing' : 'List'}
                           </button>
                           <button
                             onClick={() => setActiveResaleId(null)}
-                            className="p-1.5 rounded-xl hover:bg-white/5 text-white/30"
+                            disabled={processingId === ticket.id}
+                            className="p-1.5 rounded-xl hover:bg-white/5 text-white/30 disabled:opacity-20"
                           >
                             <Ban size={14} />
                           </button>
@@ -274,9 +300,11 @@ export const MyTickets: React.FC = () => {
                           {!isPast && ticket.status === 'resale' && (
                             <button
                               onClick={() => handleCancelResale(ticket)}
-                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic"
+                              disabled={processingId === ticket.id}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <Ban size={12} /> Cancel
+                              {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
+                              {processingId === ticket.id ? 'Cancelling...' : 'Cancel'}
                             </button>
                           )}
                         </div>
