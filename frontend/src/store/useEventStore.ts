@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import { config } from '../config';
 import { getReadProvider } from '../utils/blockchain';
 
-import { ipfsToHttpUrl } from '../utils/ipfs';
+import { ipfsToHttpUrl, IPFS_GATEWAYS, extractCid } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
@@ -107,28 +107,38 @@ export const useEventStore = create<EventState>((set) => ({
             let description = "No description available.";
             let category = "Uncategorized";
             let hasIpfsError = false;
+            let imageUrl: string | undefined = undefined;
 
             if (ipfsHash) {
-              try {
-                const url = ipfsToHttpUrl(ipfsHash);
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 sec timeout
-                const res = await fetch(url, { signal: controller.signal });
-                clearTimeout(timeoutId);
+              const cid = extractCid(ipfsHash) || ipfsHash;
+              let fetched = false;
 
-                if (res.ok) {
-                  const metadata = await res.json();
-                  title = metadata.name || title;
-                  location = metadata.location || location;
-                  date = metadata.date || date;
-                  description = metadata.description || description;
-                  category = metadata.category || category;
-                } else {
-                  console.warn("IPFS Metadata fetch non-ok response");
-                  hasIpfsError = true;
+              for (const gateway of IPFS_GATEWAYS) {
+                try {
+                  const url = `${gateway}/${cid}`;
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 6000);
+                  const res = await fetch(url, { signal: controller.signal });
+                  clearTimeout(timeoutId);
+
+                  if (res.ok) {
+                    const metadata = await res.json();
+                    title = metadata.name || title;
+                    location = metadata.location || location;
+                    date = metadata.date || date;
+                    description = metadata.description || description;
+                    category = metadata.category || category;
+                    imageUrl = metadata.image || undefined;
+                    fetched = true;
+                    break;
+                  }
+                } catch (e) {
+                  // Ignore and try next gateway
                 }
-              } catch (e) {
-                console.error("IPFS Metadata fetch error for event", eventId, e);
+              }
+
+              if (!fetched) {
+                console.warn("All IPFS gateways failed for event", eventId);
                 hasIpfsError = true;
               }
             } else {
@@ -146,6 +156,7 @@ export const useEventStore = create<EventState>((set) => ({
               location,
               category,
               hasIpfsError,
+              imageUrl,
               organizerId: evt.organiser || evt[5] || logOrganiser,
               royaltyBps: Number(evt.royaltyBps || evt[3]),
               status: isExpired ? 'past' : 'active',
