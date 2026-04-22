@@ -12,6 +12,7 @@ import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../../utils/ipfs';
 
 const CONTRACT_ABI = [
   "function buyTicket(uint eventId) public payable",
+  "function buyTicketWithReferral(uint eventId, address referrer) public payable",
   "function buyResaleTicket(uint tokenId) public payable",
   "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer)",
   "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei)"
@@ -116,10 +117,22 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
       const priceWei = ethers.parseEther(selectedTier.price.toString());
 
+      // Check for referral in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const referrerAddress = urlParams.get('ref');
+      const isValidAddress = referrerAddress && /^0x[a-fA-F0-9]{40}$/.test(referrerAddress);
+
       // Trigger real blockchain transaction
       // Assuming event.id is the numeric ID from the blockchain (synced in ManageEvents)
       const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1;
-      const tx = await contract.buyTicket(numericEventId, { value: priceWei });
+      
+      let tx;
+      if (isValidAddress && referrerAddress.toLowerCase() !== user.id?.toLowerCase() && referrerAddress.toLowerCase() !== event.organizerId?.toLowerCase()) {
+        tx = await contract.buyTicketWithReferral(numericEventId, referrerAddress, { value: priceWei });
+      } else {
+        tx = await contract.buyTicket(numericEventId, { value: priceWei });
+      }
+      
       const receipt = await tx.wait();
 
       // Find TokenID from logs

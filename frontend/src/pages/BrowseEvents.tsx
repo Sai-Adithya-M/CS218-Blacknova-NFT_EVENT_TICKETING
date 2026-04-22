@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useEventStore } from '../store/useEventStore';
 import { EventCard } from '../components/events/EventCard';
 import { EventDetailModal } from '../components/events/EventDetailModal';
@@ -17,6 +18,32 @@ export const BrowseEvents: React.FC = () => {
     minPrice: '',
     maxPrice: '',
   });
+
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (events.length > 0) {
+      const params = new URLSearchParams(location.search);
+      const eventId = params.get('event');
+      if (eventId && !selectedEvent) {
+        const found = events.find(e => e.id === eventId);
+        if (found) {
+          setSelectedEvent(found);
+        }
+      }
+    }
+  }, [location.search, events, selectedEvent]);
+
+  const handleCloseModal = () => {
+    setSelectedEvent(null);
+    const params = new URLSearchParams(location.search);
+    if (params.has('event')) {
+      params.delete('event');
+      params.delete('ref');
+      navigate({ search: params.toString() }, { replace: true });
+    }
+  };
 
   const filteredEvents = useMemo(() => {
     return events.filter(event => {
@@ -192,7 +219,7 @@ export const BrowseEvents: React.FC = () => {
       <EventDetailModal
         event={selectedEvent}
         isOpen={!!selectedEvent}
-        onClose={() => setSelectedEvent(null)}
+        onClose={handleCloseModal}
       />
     </motion.div>
   );

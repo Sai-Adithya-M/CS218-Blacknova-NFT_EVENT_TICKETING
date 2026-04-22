@@ -13,7 +13,9 @@ import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function createEvent(string memory ipfsHash, uint32 maxTickets, uint256 priceWei, uint8 royaltyBps) external",
-  "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)"
+  "function addReferral(uint eventId, address referrer, uint256 bps) external",
+  "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)",
+  "event ReferralAdded(uint indexed eventId, address indexed referrer, uint256 bps)"
 ];
 
 interface TierFormData {
@@ -32,6 +34,10 @@ export const ManageEvents: React.FC = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [referralInputs, setReferralInputs] = useState<Record<string, { address: string, bps: string }>>({});
+  const [generatedLinks, setGeneratedLinks] = useState<Record<string, string>>({});
+  const [isAddingReferral, setIsAddingReferral] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -209,6 +215,39 @@ export const ManageEvents: React.FC = () => {
       setError(err.message || "Failed to create event.");
     } finally {
       setIsMining(false);
+    }
+  };
+
+  const handleAddReferral = async (eventId: string) => {
+    const inputs = referralInputs[eventId];
+    if (!inputs || !/^0x[a-fA-F0-9]{40}$/.test(inputs.address)) {
+      alert("Invalid Ethereum address.");
+      return;
+    }
+    const pct = parseFloat(inputs.bps);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      alert("Invalid percentage. Must be between 0 and 100.");
+      return;
+    }
+
+    setIsAddingReferral(eventId);
+    try {
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(config.contractAddress, ABI, signer);
+      
+      const numericEventId = parseInt(eventId.replace('evt_', ''), 10) || 1;
+      const bps = Math.floor(pct * 100);
+      const tx = await contract.addReferral(numericEventId, inputs.address, bps);
+      await tx.wait();
+
+      const link = `${window.location.origin}/events?event=${eventId}&ref=${inputs.address}`;
+      setGeneratedLinks(prev => ({ ...prev, [eventId]: link }));
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to add referral.");
+    } finally {
+      setIsAddingReferral(null);
     }
   };
 
@@ -589,6 +628,58 @@ export const ManageEvents: React.FC = () => {
                             </div>
                           </div>
                         </div>
+
+                        {/* Referrals Section (Only for active events) */}
+                        {manageTab === 'active' && (
+                          <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
+                            <h4 className="text-[9px] font-black uppercase tracking-widest text-[var(--accent-purple)] italic">Add Referral Program</h4>
+                            
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <input 
+                                placeholder="Referrer Address (0x...)"
+                                className="flex-1 bg-black/40 border border-white/5 rounded-xl py-2 px-3 text-xs font-mono text-white focus:border-[var(--accent-purple)] outline-none"
+                                value={referralInputs[event.id]?.address || ''}
+                                onChange={e => setReferralInputs(prev => ({ ...prev, [event.id]: { ...prev[event.id], address: e.target.value } }))}
+                              />
+                              <div className="relative w-full sm:w-24">
+                                <input 
+                                  placeholder="%"
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  className="w-full bg-black/40 border border-white/5 rounded-xl py-2 px-3 text-xs text-center font-bold text-white focus:border-[var(--accent-purple)] outline-none"
+                                  value={referralInputs[event.id]?.bps || ''}
+                                  onChange={e => setReferralInputs(prev => ({ ...prev, [event.id]: { ...prev[event.id], bps: e.target.value } }))}
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-white/30">%</span>
+                              </div>
+                              <button
+                                disabled={isAddingReferral === event.id}
+                                onClick={() => handleAddReferral(event.id)}
+                                className="px-4 py-2 rounded-xl bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-purple)]/30 transition-all disabled:opacity-50"
+                              >
+                                {isAddingReferral === event.id ? 'Adding...' : 'Generate Link'}
+                              </button>
+                            </div>
+
+                            {generatedLinks[event.id] && (
+                              <div className="p-3 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/20 flex flex-col sm:flex-row items-center gap-3">
+                                <code className="flex-1 text-[9px] font-mono text-[var(--accent-teal)] truncate w-full sm:w-auto">
+                                  {generatedLinks[event.id]}
+                                </code>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(generatedLinks[event.id]);
+                                    alert("Referral link copied!");
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[8px] font-black uppercase shrink-0"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

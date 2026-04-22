@@ -29,12 +29,16 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint => Event) public events;
     mapping(uint => uint) public tokenToEvent;
     mapping(uint => ResaleListing) public resaleListings;
+    
+    // eventId => (referrer address => percentage in basis points)
+    mapping(uint => mapping(address => uint256)) public eventReferrals;
 
     event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash);
     event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer);
     event TicketListed(uint indexed tokenId, address indexed seller, uint256 priceWei);
     event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei);
     event ListingCancelled(uint indexed tokenId);
+    event ReferralAdded(uint indexed eventId, address indexed referrer, uint256 bps);
 
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
@@ -58,26 +62,55 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     function buyTicket(uint eventId) public payable nonReentrant {
+        _buyTicketInternal(eventId, msg.sender, msg.value, address(0));
+    }
+
+    function buyTicketWithReferral(uint eventId, address referrer) public payable nonReentrant {
+        _buyTicketInternal(eventId, msg.sender, msg.value, referrer);
+    }
+
+    function _buyTicketInternal(uint eventId, address buyer, uint256 amount, address referrer) internal {
         Event storage evt = events[eventId];
         require(evt.ticketsSold < evt.maxTickets, "Sold out");
-        require(msg.sender != evt.organiser,"Organiser cannot buy ticket");
+        require(buyer != evt.organiser, "Organiser cannot buy their own tickets");
         require(evt.exists, "Event does not exist");
-        require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
-        require(msg.value == evt.priceWei, "Incorrect ETH amount");
+        require(amount == evt.priceWei, "Incorrect ETH amount");
         
-
         uint tokenId = nextTokenId;
         nextTokenId++;
 
         evt.ticketsSold++;
         tokenToEvent[tokenId] = eventId;
         
-        _safeMint(msg.sender, tokenId);
+        _safeMint(buyer, tokenId);
         
-        (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
-        require(success, "Transfer failed");
+        uint256 organiserAmount = amount;
+        
+        if (referrer != address(0) && referrer != evt.organiser && eventReferrals[eventId][referrer] > 0) {
+            uint256 referralBps = eventReferrals[eventId][referrer];
+            uint256 referrerAmount = (amount * referralBps) / 10000;
+            organiserAmount = amount - referrerAmount;
+            
+            (bool successRef, ) = payable(referrer).call{value: referrerAmount}("");
+            require(successRef, "Referral transfer failed");
+        }
+        
+        (bool successOrg, ) = payable(evt.organiser).call{value: organiserAmount}("");
+        require(successOrg, "Transfer failed");
 
-        emit TicketMinted(tokenId, eventId, msg.sender);
+        emit TicketMinted(tokenId, eventId, buyer);
+    }
+
+    function addReferral(uint eventId, address referrer, uint256 bps) external {
+        Event storage evt = events[eventId];
+        require(evt.exists, "Event does not exist");
+        require(msg.sender == evt.organiser, "Only organiser can add referral");
+        require(referrer != address(0), "Invalid referrer");
+        require(referrer != evt.organiser, "Cannot refer self");
+        require(bps <= 10000, "BPS cannot exceed 10000");
+        
+        eventReferrals[eventId][referrer] = bps;
+        emit ReferralAdded(eventId, referrer, bps);
     }
 
     // --- Marketplace Functions ---
