@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { LoginModal } from '../ui/LoginModal';
 import { config } from '../../config';
 import { ethers } from 'ethers';
+import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../../utils/ipfs';
 
 const CONTRACT_ABI = [
   "function buyTicket(uint eventId) public payable",
@@ -43,22 +44,13 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   // Hook must be called unconditionally (before any early return)
   const [modalGwIndex, setModalGwIndex] = useState(0);
 
-  const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
-  const extractCid = (url?: string): string | null => {
-    if (!url) return null;
-    const match = url.match(/\/ipfs\/(.+)$/);
-    return match ? match[1] : null;
-  };
   const cid = extractCid(event?.imageUrl);
-  const gateways = [
-    'https://cloudflare-ipfs.com/ipfs',
-    'https://dweb.link/ipfs',
-    'https://ipfs.io/ipfs',
-    'https://gateway.pinata.cloud/ipfs',
-  ];
+  const gateways = IPFS_GATEWAYS;
+  
   const modalImageSrc = cid
     ? `${gateways[modalGwIndex]}/${cid}`
     : (event?.imageUrl || FALLBACK_IMG);
+    
   const handleModalImgError = useCallback(() => {
     if (cid && modalGwIndex < gateways.length - 1) {
       setModalGwIndex(prev => prev + 1);

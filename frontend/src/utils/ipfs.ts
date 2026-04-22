@@ -6,15 +6,39 @@
 const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
 
 /**
- * Ordered list of public IPFS gateways (most reliable first).
- * Pinata's public gateway is rate-limited, so we prefer Cloudflare & dweb.link.
+ * Ordered list of public IPFS gateways.
+ * We prioritize dweb.link and cloudflare as they are generally more reliable for browsers.
  */
-const IPFS_GATEWAYS = [
+export const IPFS_GATEWAYS = [
+  'https://gateway.pinata.cloud/ipfs',
   'https://cloudflare-ipfs.com/ipfs',
   'https://dweb.link/ipfs',
   'https://ipfs.io/ipfs',
-  'https://gateway.pinata.cloud/ipfs',
 ];
+
+export const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
+
+/**
+ * Robustly extract a CID from various formats:
+ * - Full gateway URL: https://cloudflare-ipfs.com/ipfs/Qm...
+ * - Protocol URL: ipfs://Qm...
+ * - Raw CID: Qm...
+ */
+export function extractCid(url?: string): string | null {
+  if (!url) return null;
+  
+  // Case 1: CID is part of a URL path (e.g., /ipfs/Qm...)
+  const pathMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/);
+  if (pathMatch) return pathMatch[1];
+
+  // Case 2: protocol format (ipfs://Qm...)
+  if (url.startsWith('ipfs://')) return url.replace('ipfs://', '').trim();
+
+  // Case 3: Raw CID (starts with Qm or ba)
+  if (url.startsWith('Qm') || url.startsWith('ba')) return url.trim();
+
+  return null;
+}
 
 /**
  * Upload a file to IPFS using Pinata's pinning API.
@@ -28,7 +52,6 @@ export async function uploadToIPFS(file: File): Promise<string> {
   const formData = new FormData();
   formData.append('file', file);
 
-  // Optional: add metadata for easier identification in Pinata dashboard
   const metadata = JSON.stringify({
     name: `netix-event-${Date.now()}-${file.name}`,
   });
@@ -49,29 +72,15 @@ export async function uploadToIPFS(file: File): Promise<string> {
   }
 
   const data = await res.json();
-  return data.IpfsHash; // e.g. "QmX7bF3..."
+  return data.IpfsHash;
 }
 
 /**
- * Convert an IPFS CID to a publicly accessible HTTP gateway URL.
- * Uses the most reliable gateway (Cloudflare) as default.
+ * Convert an IPFS CID or URL to a prioritized HTTP gateway URL.
  */
-export function ipfsToHttpUrl(cid: string): string {
-  if (!cid || cid.trim() === '') return '';
-  // If it's already a full URL, return as-is
-  if (cid.startsWith('http')) return cid;
-  // Strip ipfs:// prefix if present
-  const cleanCid = cid.replace('ipfs://', '').trim();
-  if (!cleanCid) return '';
-  return `${IPFS_GATEWAYS[0]}/${cleanCid}`;
-}
-
-/**
- * Get all possible gateway URLs for a CID (for fallback purposes).
- */
-export function getGatewayUrls(cid: string): string[] {
-  if (!cid || cid.trim() === '') return [];
-  const cleanCid = cid.replace('ipfs://', '').trim();
-  if (!cleanCid) return [];
-  return IPFS_GATEWAYS.map(gw => `${gw}/${cleanCid}`);
+export function ipfsToHttpUrl(cidOrUrl: string): string {
+  if (!cidOrUrl) return '';
+  const cid = extractCid(cidOrUrl);
+  if (!cid) return cidOrUrl; // Return as-is if it's already a URL or we can't parse it
+  return `${IPFS_GATEWAYS[0]}/${cid}`;
 }

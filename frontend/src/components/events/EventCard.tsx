@@ -3,6 +3,7 @@ import { Calendar, MapPin, Sparkles } from 'lucide-react';
 import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import type { Event } from '../../store/useEventStore';
 import { config } from '../../config';
+import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../../utils/ipfs';
 
 interface EventCardProps {
   event: Event;
@@ -18,24 +19,9 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
   const totalSupply = event.tiers?.reduce((sum, t) => sum + t.supply, 0) ?? 0;
   const availability = (totalSold / totalSupply) * 100;
 
-  const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
-
-  // Robust CID extraction
-  const extractCid = (url?: string): string | null => {
-    if (!url) return null;
-    const cidMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/) || 
-                     url.match(/^ipfs:\/\/([a-zA-Z0-9]+)/) ||
-                     (url.startsWith('Qm') || url.startsWith('ba') ? [null, url] : null);
-    return cidMatch ? cidMatch[1] : null;
-  };
 
   const cid = extractCid(event.imageUrl);
-  const gateways = [
-    'https://ipfs.io/ipfs',
-    'https://cloudflare-ipfs.com/ipfs',
-    'https://dweb.link/ipfs',
-    'https://gateway.pinata.cloud/ipfs',
-  ];
+  const gateways = IPFS_GATEWAYS;
 
   const [gatewayIndex, setGatewayIndex] = useState(0);
 

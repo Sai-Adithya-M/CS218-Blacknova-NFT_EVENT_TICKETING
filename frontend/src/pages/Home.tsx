@@ -9,6 +9,7 @@ import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { LoginModal } from '../components/ui/LoginModal';
+import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../utils/ipfs';
 
 const CATEGORIES = [
   { name: 'Music', color: 'from-purple-500/20 to-purple-900/10' },
@@ -320,20 +321,11 @@ export const Home: React.FC = () => {
             {activeEvents.map((event, i) => {
               const date = new Date(event.date);
               
-              const extractCid = (url?: string): string | null => {
-                if (!url) return null;
-                // Match /ipfs/CID, ipfs://CID, or raw CID
-                const cidMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/) || 
-                                 url.match(/^ipfs:\/\/([a-zA-Z0-9]+)/) ||
-                                 (url.startsWith('Qm') || url.startsWith('ba') ? [null, url] : null);
-                return cidMatch ? cidMatch[1] : null;
-              };
-
               const cid = extractCid(event.imageUrl);
-              // Use Pinata as primary for better reliability with many user CIDs
+              const gateways = IPFS_GATEWAYS;
               const currentImageSrc = cid 
-                ? `https://gateway.pinata.cloud/ipfs/${cid}` 
-                : (event.imageUrl || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80');
+                ? `${gateways[0]}/${cid}` 
+                : (event.imageUrl || FALLBACK_IMG);
 
               return (
                 <motion.div
@@ -353,12 +345,19 @@ export const Home: React.FC = () => {
                       className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
-                        if (cid && !target.src.includes('ipfs.io')) {
-                          target.src = `https://ipfs.io/ipfs/${cid}`;
-                        } else if (cid && !target.src.includes('dweb.link')) {
-                          target.src = `https://dweb.link/ipfs/${cid}`;
+                        if (!cid) {
+                          target.src = FALLBACK_IMG;
+                          return;
+                        }
+                        
+                        // Try to find the current gateway index
+                        const currentGw = gateways.find(gw => target.src.startsWith(gw));
+                        const nextIndex = gateways.indexOf(currentGw || '') + 1;
+                        
+                        if (nextIndex < gateways.length) {
+                          target.src = `${gateways[nextIndex]}/${cid}`;
                         } else {
-                          target.src = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
+                          target.src = FALLBACK_IMG;
                         }
                       }}
                     />
