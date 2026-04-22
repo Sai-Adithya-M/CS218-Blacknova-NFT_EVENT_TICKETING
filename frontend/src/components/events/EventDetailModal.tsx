@@ -194,7 +194,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const tx = await contract.buyResaleTicket(selectedResaleTicket.tokenId, { value: priceWei });
       const receipt = await tx.wait();
 
-      storeBuyResale(selectedResaleTicket.id, user.id);
+      storeBuyResale(selectedResaleTicket.id, user.id, selectedResaleTicket.resalePrice);
 
       setPurchasedTokenId(selectedResaleTicket.tokenId);
       setPurchasedTxHash(receipt.hash);

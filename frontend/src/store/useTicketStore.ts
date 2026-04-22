@@ -9,7 +9,8 @@ const ABI = [
   "function fetchEventData(uint eventId) public view returns (tuple(uint32 maxTickets, uint256 priceWei, uint32 ticketsSold, uint8 royaltyBps, bool exists, address organiser))",
   "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
-  "event TicketListed(uint indexed tokenId, address indexed seller, uint256 priceWei)"
+  "event TicketListed(uint indexed tokenId, address indexed seller, uint256 priceWei)",
+  "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)"
 ];
 
 export type TicketStatus = 'active' | 'used' | 'expired' | 'resale';
@@ -34,7 +35,7 @@ interface TicketState {
   buyTicket: (eventId: string, ownerId: string, tierName: string, tierPrice: number) => Ticket;
   listForResale: (ticketId: string, price: number) => void;
   cancelResale: (ticketId: string) => void;
-  buyResaleTicket: (ticketId: string, newOwnerId: string) => void;
+  buyResaleTicket: (ticketId: string, newOwnerId: string, pricePaid?: number) => void;
   fetchTicketsFromChain: (userAddress?: string) => Promise<void>;
 }
 
@@ -74,9 +75,9 @@ export const useTicketStore = create<TicketState>((set) => ({
     )
   })),
 
-  buyResaleTicket: (ticketId, newOwnerId) => set((state) => ({
+  buyResaleTicket: (ticketId, newOwnerId, pricePaid?: number) => set((state) => ({
     tickets: state.tickets.map(t =>
-      t.id === ticketId ? { ...t, ownerId: newOwnerId, status: 'active' as TicketStatus, resalePrice: undefined, resaleLink: undefined } : t
+      t.id === ticketId ? { ...t, ownerId: newOwnerId, status: 'active' as TicketStatus, tierPrice: pricePaid ?? t.resalePrice ?? t.tierPrice, resalePrice: undefined, resaleLink: undefined } : t
     )
   })),
 
@@ -115,7 +116,27 @@ export const useTicketStore = create<TicketState>((set) => ({
 
       console.log(`Log scan complete. Found ${ownedTokenIds.size} tokens currently owned by user.`);
 
-      // 4. Fetch metadata for each currently owned token
+      // 4. Query TicketResold events where the current user is the buyer
+      //    to determine the actual price they paid for each resold token.
+      const resoldPriceMap = new Map<string, number>();
+      if (userAddress) {
+        try {
+          const resoldFilter = contract.filters.TicketResold(null, null, userAddress);
+          const resoldLogs = await contract.queryFilter(resoldFilter, config.deploymentBlock, "latest");
+          // Take the latest resale event per token (in case of multiple resales to same user)
+          for (const log of resoldLogs) {
+            const tokenId = (log as any).args?.[0]?.toString();
+            const pricePaid = (log as any).args?.[3];
+            if (tokenId && pricePaid) {
+              resoldPriceMap.set(tokenId, parseFloat(ethers.formatEther(pricePaid)));
+            }
+          }
+        } catch (e) {
+          console.warn("Could not fetch TicketResold logs:", e);
+        }
+      }
+
+      // 5. Fetch metadata for each currently owned token
       for (const tokenId of ownedTokenIds) {
         try {
           const currentOwner = await contract.ownerOf(tokenId);
@@ -127,6 +148,10 @@ export const useTicketStore = create<TicketState>((set) => ({
           const listing = await contract.getResaleListing(tokenId);
           const isResale = listing.active || listing[2];
 
+          // Use the resale purchase price if this token was bought on the secondary market
+          const basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[2]));
+          const actualPricePaid = resoldPriceMap.get(tokenId) ?? basePrice;
+
           loadedTickets.push({
             id: `tkt_${tokenId}`,
             tokenId: tokenId,
@@ -134,7 +159,7 @@ export const useTicketStore = create<TicketState>((set) => ({
             eventId: `evt_${eventId}`,
             ownerId: currentOwner,
             tierName: 'General Access',
-            tierPrice: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
+            tierPrice: actualPricePaid,
             status: isResale ? 'resale' : 'active',
             purchasedAt: new Date().toISOString(), 
             resalePrice: isResale ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined,
