@@ -2,12 +2,13 @@ import { create } from 'zustand';
 import { ethers } from 'ethers';
 import { config } from '../config';
 import { getReadProvider } from '../utils/blockchain';
+
 import { ipfsToHttpUrl } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
-  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))",
-  "event EventCreated(uint indexed eventId, address indexed organiser, string name)"
+  "function fetchEventData(uint eventId) public view returns (tuple(uint32 maxTickets, uint256 priceWei, uint32 ticketsSold, uint8 royaltyBps, bool exists, address organiser))",
+  "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
 export interface TicketTier {
@@ -29,6 +30,7 @@ export interface Event {
   royaltyBps: number;
   status: 'active' | 'past';
   imageUrl?: string;
+  hasIpfsError?: boolean;
   tiers: TicketTier[];
 }
 
@@ -55,13 +57,13 @@ export const useEventStore = create<EventState>((set) => ({
     ]
   })),
 
-  incrementTierSold: (eventId, tierId, quantity = 1) => set((state) => ({
+  incrementTierSold: (eventId, tierId) => set((state) => ({
     events: state.events.map(e =>
       e.id === eventId
         ? {
           ...e,
           tiers: e.tiers.map(t =>
-            t.id === tierId ? { ...t, sold: t.sold + quantity } : t
+            t.id === tierId ? { ...t, sold: t.sold + 1 } : t
           )
         }
         : e
@@ -79,58 +81,93 @@ export const useEventStore = create<EventState>((set) => ({
       const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
 
-      // Use nextEventId to get the total count instead of logs
-      const nextId = await contract.nextEventId();
-      const count = Number(nextId);
-      console.log(`Contract reports ${count} total events.`);
+      const filter = contract.filters.EventCreated();
+      const eventLogs = await contract.queryFilter(filter, config.deploymentBlock, "latest");
 
-      const loadedEvents: Event[] = [];
+      console.log(`Found ${eventLogs.length} events on-chain.`);
 
-      // Iterate from 1 to nextId (usually starts at 1)
-      for (let i = 1; i < count; i++) {
+      const eventPromises = eventLogs.map(async (log) => {
+        let eventIdForCatch: string | null = null;
         try {
-          const evt = await contract.fetchEventData(i);
-          
-          if (evt.exists || evt[6]) {
-            const rawName = evt.name || evt[0];
-            const nameParts = rawName.split('|||');
+          const parsedLog = contract.interface.parseLog(log as any);
+          const eventId = parsedLog?.args?.eventId || (log as any).args?.[0];
+          eventIdForCatch = eventId ? eventId.toString() : null;
+          const logOrganiser = parsedLog?.args?.organiser || (log as any).args?.[1];
+          const ipfsHash = parsedLog?.args?.ipfsHash || (log as any).args?.[2];
 
-            const title = nameParts[0] || rawName;
-            const location = nameParts[1] || '';
-            const date = nameParts[2] || new Date().toISOString();
-            const description = nameParts[3] || '';
-            const category = nameParts[4] || 'Music & Concerts';
-            const imageCid = nameParts[5] || '';
+          if (!eventId) return null;
+
+          const evt = await contract.fetchEventData(eventId);
+
+
+          if (evt.exists || evt[4]) {
+            let title = "Unknown Event";
+            let location = "Unknown Location";
+            let date = new Date().toISOString();
+            let description = "No description available.";
+            let category = "Uncategorized";
+            let hasIpfsError = false;
+
+            if (ipfsHash) {
+              try {
+                const url = ipfsToHttpUrl(ipfsHash);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 sec timeout
+                const res = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (res.ok) {
+                  const metadata = await res.json();
+                  title = metadata.name || title;
+                  location = metadata.location || location;
+                  date = metadata.date || date;
+                  description = metadata.description || description;
+                  category = metadata.category || category;
+                } else {
+                  console.warn("IPFS Metadata fetch non-ok response");
+                  hasIpfsError = true;
+                }
+              } catch (e) {
+                console.error("IPFS Metadata fetch error for event", eventId, e);
+                hasIpfsError = true;
+              }
+            } else {
+               hasIpfsError = true;
+            }
 
             const eventDate = new Date(date);
             const isExpired = eventDate < new Date();
 
-            loadedEvents.push({
-              id: `evt_${i}`,
-              title,
+            return {
+              id: `evt_${eventId.toString()}`,
+              title: hasIpfsError ? title + " ⚠️ (Metadata Unavailable)" : title,
               description,
               date,
               location,
               category,
-              organizerId: evt.organiser || evt[4],
-              royaltyBps: Number(evt.royaltyBps || evt[5]),
+              hasIpfsError,
+              organizerId: evt.organiser || evt[5] || logOrganiser,
+              royaltyBps: Number(evt.royaltyBps || evt[3]),
               status: isExpired ? 'past' : 'active',
-              imageUrl: imageCid ? ipfsToHttpUrl(imageCid) : undefined,
               tiers: [
                 {
-                  id: `tier_evt_${i}`,
+                  id: `tier_evt_${eventId.toString()}`,
                   name: 'General Access',
-                  price: parseFloat(ethers.formatEther(evt.priceWei || evt[2])),
-                  supply: Number(evt.maxTickets || evt[1]),
-                  sold: Number(evt.ticketsSold || evt[3])
+                  price: parseFloat(ethers.formatEther(evt.priceWei || evt[1])),
+                  supply: Number(evt.maxTickets || evt[0]),
+                  sold: Number(evt.ticketsSold || evt[2])
                 }
               ]
-            });
+            } as Event;
           }
         } catch (e) {
-          console.error(`Sync error for event ID ${i}:`, e);
+          console.error(`Sync error for event ID ${eventIdForCatch || 'unknown'}:`, e);
         }
-      }
+        return null;
+      });
+
+      const resolvedEvents = await Promise.all(eventPromises);
+      const loadedEvents = resolvedEvents.filter((ev): ev is Event => ev !== null);
 
       set({ events: loadedEvents, isLoading: false });
       console.log("Blockchain sync complete.");

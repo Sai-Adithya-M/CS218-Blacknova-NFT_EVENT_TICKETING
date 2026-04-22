@@ -6,8 +6,8 @@ import { getReadProvider } from '../utils/blockchain';
 const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint)",
-  "function fetchEventData(uint eventId) public view returns (tuple(string name, uint maxTickets, uint priceWei, uint ticketsSold, address organiser, uint96 royaltyBps, bool exists))",
-  "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint priceWei, bool active))",
+  "function fetchEventData(uint eventId) public view returns (tuple(uint32 maxTickets, uint256 priceWei, uint32 ticketsSold, uint8 royaltyBps, bool exists, address organiser))",
+  "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)"
 ];
 

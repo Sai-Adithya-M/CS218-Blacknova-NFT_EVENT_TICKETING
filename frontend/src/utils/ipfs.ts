@@ -76,6 +76,38 @@ export async function uploadToIPFS(file: File): Promise<string> {
 }
 
 /**
+ * Upload JSON metadata to IPFS using Pinata.
+ * Returns the IPFS CID string.
+ */
+export async function uploadJSONToIPFS(jsonData: any): Promise<string> {
+  if (!PINATA_JWT) {
+    throw new Error('Pinata JWT not configured. Set VITE_PINATA_JWT in your .env file.');
+  }
+
+  const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${PINATA_JWT}`,
+    },
+    body: JSON.stringify({
+      pinataOptions: { cidVersion: 1 },
+      pinataMetadata: { name: `netix-event-${Date.now()}.json` },
+      pinataContent: jsonData,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error('Pinata JSON upload failed:', errBody);
+    throw new Error(`IPFS JSON upload failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.IpfsHash;
+}
+
+/**
  * Convert an IPFS CID or URL to a prioritized HTTP gateway URL.
  */
 export function ipfsToHttpUrl(cidOrUrl: string): string {

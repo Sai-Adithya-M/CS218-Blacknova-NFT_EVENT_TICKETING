@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { X, Calendar, MapPin, Users, Tag, ShieldCheck, ExternalLink, Loader2, CheckCircle, AlertCircle, Wallet } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Event, TicketTier } from '../../store/useEventStore';
@@ -36,7 +36,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const [purchasedTxHash, setPurchasedTxHash] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  
+
   const { buyTicket, buyResaleTicket: storeBuyResale, tickets } = useTicketStore();
   const { incrementTierSold } = useEventStore();
   const { user, isAuthenticated, updateWallet } = useAuthStore();
@@ -44,19 +44,18 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   // Hook must be called unconditionally (before any early return)
   const [modalGwIndex, setModalGwIndex] = useState(0);
 
-  const cid = extractCid(event?.imageUrl);
+  const cid = extractCid(event?.imageUrl || '');
   const gateways = IPFS_GATEWAYS;
   
   const modalImageSrc = cid
     ? `${gateways[modalGwIndex]}/${cid}`
     : (event?.imageUrl || FALLBACK_IMG);
     
-  const handleModalImgError = useCallback(() => {
+  const handleModalImgError = React.useCallback(() => {
     if (cid && modalGwIndex < gateways.length - 1) {
       setModalGwIndex(prev => prev + 1);
     }
   }, [cid, modalGwIndex, gateways.length]);
-
   const resaleTickets = tickets.filter(t => t.eventId === event?.id && t.status === 'resale');
 
   if (!isOpen || !event) return null;
@@ -102,7 +101,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
-      
+
+      // Ensure correct network
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(config.sepoliaChainId)) {
         await (window as any).ethereum.request({
@@ -114,43 +114,38 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      const unitPriceWei = ethers.parseEther(selectedTier.price.toString());
-      const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1; 
-      
-      // Process quantity
-      let lastTokenId = '';
-      let lastTxHash = '';
+      const priceWei = ethers.parseEther(selectedTier.price.toString());
 
-      // We call buyTicket in a loop as the contract currently supports 1 ticket per call
-      for (let i = 0; i < quantity; i++) {
-        const tx = await contract.buyTicket(numericEventId, { value: unitPriceWei });
-        const receipt = await tx.wait();
-        lastTxHash = receipt.hash;
+      // Trigger real blockchain transaction
+      // Assuming event.id is the numeric ID from the blockchain (synced in ManageEvents)
+      const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1;
+      const tx = await contract.buyTicket(numericEventId, { value: priceWei });
+      const receipt = await tx.wait();
 
-        if (receipt && receipt.logs) {
-          try {
-            const log = receipt.logs.find((l: any) => {
-              try {
-                return contract.interface.parseLog(l)?.name === 'TicketMinted';
-              } catch { return false; }
-            });
-            if (log) {
-              const parsed = contract.interface.parseLog(log);
-              lastTokenId = parsed?.args?.tokenId?.toString() || lastTokenId;
-            }
-          } catch (e) {
-            console.warn("Log parsing failed", e);
+      // Find TokenID from logs
+      let tokenId = `NFT_${Date.now()}`;
+      if (receipt && receipt.logs) {
+        try {
+          const log = receipt.logs.find((l: any) => {
+            try {
+              return contract.interface.parseLog(l)?.name === 'TicketMinted';
+            } catch { return false; }
+          });
+          if (log) {
+            const parsed = contract.interface.parseLog(log);
+            tokenId = parsed?.args?.tokenId?.toString() || tokenId;
           }
+        } catch (e) {
+          console.warn("Log parsing failed", e);
         }
-        
-        buyTicket(event.id, user.id, selectedTier.name, selectedTier.price);
-        updateWallet(-selectedTier.price);
       }
 
-      incrementTierSold(event.id, selectedTier.id, quantity);
-      
-      setPurchasedTokenId(quantity > 1 ? `${quantity} Tickets Purchased` : lastTokenId);
-      setPurchasedTxHash(lastTxHash);
+      buyTicket(event.id, user.id, selectedTier.name, selectedTier.price);
+      incrementTierSold(event.id, selectedTier.id);
+      updateWallet(-selectedTier.price);
+
+      setPurchasedTokenId(tokenId);
+      setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
       console.error("Purchase failed:", err);
@@ -170,6 +165,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       setStep('error');
       return;
     }
+
+    if (!selectedResaleTicket) return;
 
     // Get the tickets to buy (cheapest N from the selected tier)
     const availableFromTier = resaleTickets
@@ -192,20 +189,15 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      let lastTokenId = '';
-      let lastTxHash = '';
+      const priceWei = ethers.parseEther(selectedResaleTicket.resalePrice.toString());
 
-      for (const tkt of availableFromTier) {
-        const priceWei = ethers.parseEther(tkt.resalePrice.toString());
-        const tx = await contract.buyResaleTicket(tkt.tokenId, { value: priceWei });
-        const receipt = await tx.wait();
-        lastTxHash = receipt.hash;
-        lastTokenId = tkt.tokenId;
-        storeBuyResale(tkt.id, user.id);
-      }
-      
-      setPurchasedTokenId(quantity > 1 ? `${quantity} Resale Tickets` : lastTokenId);
-      setPurchasedTxHash(lastTxHash);
+      const tx = await contract.buyResaleTicket(selectedResaleTicket.tokenId, { value: priceWei });
+      const receipt = await tx.wait();
+
+      storeBuyResale(selectedResaleTicket.id, user.id);
+
+      setPurchasedTokenId(selectedResaleTicket.tokenId);
+      setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
       console.error("Resale purchase failed:", err);
@@ -251,17 +243,16 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   {/* Event Header */}
                   <div className="relative h-48 rounded-t-3xl overflow-hidden">
                     <img
-                      src={modalImageSrc}
+                      src={event.imageUrl || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80'}
                       alt={event.title}
                       className="w-full h-full object-cover"
-                      onError={handleModalImgError}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/50 to-transparent" />
                     <div className="absolute bottom-0 left-0 p-6">
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3">
                         <ShieldCheck size={10} /> Verified On-Chain
                       </span>
-                      <h2 className="text-2xl font-black tracking-tight italic">{event.title}</h2>
+                      <h2 className="text-2xl font-black uppercase tracking-tight italic">{event.title}</h2>
                     </div>
                   </div>
 
@@ -271,20 +262,20 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                       <span className="flex items-center gap-1.5"><Calendar size={12} className="text-[var(--accent-purple)]" />{date.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</span>
                       <span className="flex items-center gap-1.5"><MapPin size={12} className="text-[var(--accent-teal)]" />{event.location}</span>
                       <span className="flex items-center gap-1.5"><Tag size={12} />{event.category}</span>
-                      <span className="flex items-center gap-1.5 text-[var(--accent-teal)]"><ShieldCheck size={12} />{(event.royaltyBps / 100).toFixed(1)}% Royalty</span>
+                      <span className="flex items-center gap-1.5 text-[var(--accent-teal)]"><ShieldCheck size={12} />{event.royaltyBps.toFixed(1)}% Royalty</span>
                     </div>
 
                     <p className="text-sm text-white/60 leading-relaxed">{event.description}</p>
 
                     {/* Market Type Toggle */}
                     <div className="flex p-1 rounded-xl bg-white/5 border border-white/10">
-                      <button 
+                      <button
                         onClick={() => setMarketType('primary')}
                         className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'primary' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
                       >
                         Primary Sale
                       </button>
-                      <button 
+                      <button
                         onClick={() => setMarketType('secondary')}
                         className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'secondary' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
                       >
@@ -304,80 +295,41 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
                     {/* Tier Selector (Primary) */}
                     {marketType === 'primary' && (
-                      <div className="space-y-6">
-                        <div>
-                          <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] mb-4 italic">Select Ticket Tier</h3>
-                          <div className="space-y-3">
-                            {event.tiers.map(tier => {
-                              const isSoldOut = tier.sold >= tier.supply;
-                              const isSelected = selectedTier?.id === tier.id;
-                              return (
-                                <button
-                                  key={tier.id}
-                                  disabled={isSoldOut}
-                                  onClick={() => {
-                                    setSelectedTier(tier);
-                                    setQuantity(1);
-                                  }}
-                                  className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
-                                    isSoldOut
-                                      ? 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
-                                      : isSelected
+                      <div>
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] mb-4 italic">Select Ticket Tier</h3>
+                        <div className="space-y-3">
+                          {event.tiers.map(tier => {
+                            const isSoldOut = tier.sold >= tier.supply;
+                            const isSelected = selectedTier?.id === tier.id;
+                            return (
+                              <button
+                                key={tier.id}
+                                disabled={isSoldOut}
+                                onClick={() => setSelectedTier(tier)}
+                                className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${isSoldOut
+                                    ? 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
+                                    : isSelected
                                       ? 'border-[var(--accent-purple)]/50 bg-[var(--accent-purple)]/10'
                                       : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
                                   }`}
-                                >
-                                  <div>
-                                    <p className="font-black uppercase tracking-tight italic">{tier.name}</p>
-                                    <p className="text-[11px] text-white/40 font-bold mt-0.5">
-                                      <Users size={10} className="inline mr-1" />
-                                      {tier.sold}/{tier.supply} sold
-                                      {isSoldOut && <span className="ml-2 text-red-400">SOLD OUT</span>}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
-                                      {tier.price} ETH
-                                    </p>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
+                              >
+                                <div>
+                                  <p className="font-black uppercase tracking-tight italic">{tier.name}</p>
+                                  <p className="text-[11px] text-white/40 font-bold mt-0.5">
+                                    <Users size={10} className="inline mr-1" />
+                                    {tier.sold}/{tier.supply} sold
+                                    {isSoldOut && <span className="ml-2 text-red-400">SOLD OUT</span>}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
+                                    {tier.price} ETH
+                                  </p>
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
-
-                        {selectedTier && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-white/5 border border-white/10 rounded-2xl p-6"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-white/40 italic">Quantity</span>
-                                <span className="text-[9px] font-bold text-[var(--accent-teal)] uppercase">
-                                  {selectedTier.supply - selectedTier.sold - quantity} remaining
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-6">
-                                <button 
-                                  onClick={() => setQuantity(prev => Math.max(1, prev - 1))}
-                                  className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-xl font-bold hover:bg-white/10 transition-all"
-                                >
-                                  -
-                                </button>
-                                <span className="text-2xl font-black italic w-8 text-center">{quantity}</span>
-                                <button 
-                                  onClick={() => setQuantity(prev => Math.min(selectedTier.supply - selectedTier.sold, prev + 1))}
-                                  className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-xl font-bold hover:bg-white/10 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
-                                  disabled={quantity >= (selectedTier.supply - selectedTier.sold)}
-                                >
-                                  +
-                                </button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
                       </div>
                     )}
 
@@ -446,39 +398,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                             )}
                           </div>
                         </div>
-
-                        {selectedResaleTicket && resaleTickets.length > 0 && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-white/5 border border-white/10 rounded-2xl p-6"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-white/40 italic">Quantity</span>
-                                <span className="text-[9px] font-bold text-[var(--accent-teal)] uppercase">
-                                  {Math.max(0, resaleTickets.filter(t => t.tierName === selectedResaleTicket.tierName).length - quantity)} other listings
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-6">
-                                <button 
-                                  onClick={() => setQuantity(prev => Math.max(1, prev - 1))}
-                                  className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-xl font-bold hover:bg-white/10 transition-all"
-                                >
-                                  -
-                                </button>
-                                <span className="text-2xl font-black italic w-8 text-center">{quantity}</span>
-                                <button 
-                                  onClick={() => setQuantity(prev => Math.min(resaleTickets.filter(t => t.tierName === selectedResaleTicket.tierName).length, prev + 1))}
-                                  className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-xl font-bold hover:bg-white/10 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
-                                  disabled={quantity >= resaleTickets.filter(t => t.tierName === selectedResaleTicket.tierName).length}
-                                >
-                                  +
-                                </button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
                       </div>
                     )}
 
@@ -499,20 +418,15 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                           whileTap={{ scale: 0.98 }}
                           disabled={marketType === 'primary' ? !selectedTier : !selectedResaleTicket}
                           onClick={marketType === 'primary' ? handlePurchase : handleBuyResale}
-                          className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all ${
-                            (marketType === 'primary' ? selectedTier : selectedResaleTicket)
+                          className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all ${(marketType === 'primary' ? selectedTier : selectedResaleTicket)
                               ? 'bg-white text-black shadow-2xl hover:shadow-white/20'
                               : 'bg-white/10 text-white/30 cursor-not-allowed'
-                          }`}
+                            }`}
                         >
                           <Wallet size={16} />
-                           {marketType === 'primary' 
-                            ? (selectedTier ? `Buy Tickets — ${(selectedTier.price * quantity).toFixed(3)} ETH` : 'Select a tier to Buy Tickets')
-                            : (resaleTickets.length === 0 
-                                ? 'No resale present now' 
-                                : selectedResaleTicket 
-                                ? `Buy Resale — ${(resaleTickets.filter(t => t.tierName === selectedResaleTicket.tierName).sort((a,b) => (a.resalePrice||0)-(b.resalePrice||0)).slice(0, quantity).reduce((sum, t) => sum + (t.resalePrice||0), 0)).toFixed(3)} ETH` 
-                                : 'Select a ticket to Buy')
+                          {marketType === 'primary'
+                            ? (selectedTier ? `Purchase ${selectedTier.name} — ${selectedTier.price} ETH` : 'Select a tier to continue')
+                            : (selectedResaleTicket ? `Buy Resale Ticket — ${selectedResaleTicket.resalePrice} ETH` : 'Select a ticket to buy')
                           }
                         </motion.button>
                       )}
@@ -597,3 +511,4 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
     </>
   );
 };
+
