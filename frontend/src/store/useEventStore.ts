@@ -1,15 +1,39 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { ethers } from 'ethers';
 import { config } from '../config';
 import { getReadProvider } from '../utils/blockchain';
-
-import { ipfsToHttpUrl, IPFS_GATEWAYS, extractCid } from '../utils/ipfs';
+import { IPFS_GATEWAYS, extractCid } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
-  "function fetchEventData(uint eventId) public view returns (tuple(uint32 maxTickets, uint256 priceWei, uint32 ticketsSold, uint8 royaltyBps, bool exists, address organiser))",
-  "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)"
+  "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
+  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)"
 ];
+
+const fetchIPFSMetadata = async (ipfsHash: string): Promise<any> => {
+  const cid = extractCid(ipfsHash) || ipfsHash;
+  if (!cid) return null;
+  const controllers = IPFS_GATEWAYS.slice(0, 3).map(() => new AbortController());
+  const timeoutId = setTimeout(() => controllers.forEach(c => c.abort()), 10000);
+  try {
+    const fetchPromises = IPFS_GATEWAYS.slice(0, 3).map((gateway, i) => 
+      fetch(`${gateway}/${cid}`, { signal: controllers[i].signal })
+        .then(res => res.ok ? res.json() : Promise.reject())
+    );
+    const result = await Promise.any(fetchPromises);
+    clearTimeout(timeoutId);
+    return result;
+  } catch (e) {
+    for (const gateway of IPFS_GATEWAYS.slice(3)) {
+      try {
+        const response = await fetch(`${gateway}/${cid}`, { signal: AbortSignal.timeout(5000) });
+        if (response.ok) return await response.json();
+      } catch (err) { continue; }
+    }
+  }
+  return null;
+};
 
 export interface TicketTier {
   id: string;
@@ -26,167 +50,142 @@ export interface Event {
   date: string;
   location: string;
   category: string;
+  imageUrl?: string;
   organizerId: string;
   royaltyBps: number;
-  status: 'active' | 'past';
-  imageUrl?: string;
-  hasIpfsError?: boolean;
+  status: 'active' | 'past' | 'cancelled';
   tiers: TicketTier[];
+  hasIpfsError?: boolean;
 }
 
 interface EventState {
   events: Event[];
   isLoading: boolean;
-  createEvent: (event: Omit<Event, 'id' | 'status'> & { id?: string }) => void;
-  incrementTierSold: (eventId: string, tierId: string, quantity?: number) => void;
+  createEvent: (event: Event) => void;
+  incrementTierSold: (eventId: string, tierId: string) => void;
   fetchEventsFromChain: () => Promise<void>;
+  retryMetadata: (eventId: string, ipfsHash: string) => Promise<void>;
 }
 
-export const useEventStore = create<EventState>((set) => ({
-  events: [],
-  isLoading: false,
+// Global Deduplication Logic
+const dedupeEvents = (events: Event[]): Event[] => {
+  const seen = new Set();
+  return events.reduce((acc: Event[], current) => {
+    const titleKey = current.title.trim().toLowerCase();
+    const organizerKey = current.organizerId.toLowerCase();
+    const descKey = current.description.trim().toLowerCase();
+    
+    // Unique key combines index ID or Content Fingerprint
+    const uniqueKey = `${titleKey}_${organizerKey}_${descKey}_${current.royaltyBps}`;
+    
+    const isIdDuplicate = acc.some(e => e.id === current.id);
+    const isContentDuplicate = seen.has(uniqueKey);
 
-  createEvent: (eventData) => set((state) => ({
-    events: [
-      ...state.events,
-      {
-        ...eventData,
-        id: eventData.id || `evt_${Date.now()}`,
-        status: new Date(eventData.date) < new Date() ? 'past' : 'active'
-      }
-    ]
-  })),
-
-  incrementTierSold: (eventId, tierId) => set((state) => ({
-    events: state.events.map(e =>
-      e.id === eventId
-        ? {
-          ...e,
-          tiers: e.tiers.map(t =>
-            t.id === tierId ? { ...t, sold: t.sold + 1 } : t
-          )
-        }
-        : e
-    )
-  })),
-
-  fetchEventsFromChain: async () => {
-    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      return;
+    if (!isIdDuplicate && !isContentDuplicate) {
+      acc.push(current);
+      seen.add(uniqueKey);
     }
+    return acc;
+  }, []).sort((a,b) => b.id.localeCompare(a.id, undefined, {numeric: true}));
+};
 
-    set({ isLoading: true });
-    try {
-      console.log("Starting reliable blockchain sync using nextEventId...");
-      const provider = getReadProvider();
-      const contract = new ethers.Contract(config.contractAddress, ABI, provider);
+export const useEventStore = create<EventState>()(
+  persist(
+    (set, get) => ({
+      events: [],
+      isLoading: false,
 
-      const filter = contract.filters.EventCreated();
-      const eventLogs = await contract.queryFilter(filter, config.deploymentBlock, "latest");
+      createEvent: (event) => set((state) => ({ 
+        events: dedupeEvents([event, ...state.events]) 
+      })),
 
-      console.log(`Found ${eventLogs.length} events on-chain.`);
+      incrementTierSold: (eventId, tierId) => set((state) => ({
+        events: state.events.map(e => e.id === eventId ? {
+          ...e,
+          tiers: e.tiers.map(t => t.id === tierId ? { ...t, sold: t.sold + 1 } : t)
+        } : e)
+      })),
 
-      const eventPromises = eventLogs.map(async (log) => {
-        let eventIdForCatch: string | null = null;
+      retryMetadata: async (eventId, ipfsHash) => {
+        const metadata = await fetchIPFSMetadata(ipfsHash);
+        if (metadata) {
+          set((state) => ({
+            events: dedupeEvents(state.events.map(e => e.id === eventId ? {
+              ...e,
+              title: metadata.name || metadata.title || e.title,
+              description: metadata.description || e.description,
+              date: metadata.date || metadata.dateTime || e.date,
+              location: metadata.location || e.location,
+              category: metadata.category || e.category,
+              imageUrl: metadata.image || e.imageUrl,
+              hasIpfsError: false,
+              tiers: (metadata.tiers && Array.isArray(metadata.tiers)) ? metadata.tiers.map((t: any, tidx: number) => ({
+                id: t.id || `${eventId}_tier_${tidx}`,
+                name: t.name || 'Tier',
+                price: t.price || e.tiers[0]?.price,
+                supply: t.supply || e.tiers[0]?.supply,
+                sold: tidx === 0 ? e.tiers[0]?.sold : 0
+              })) : e.tiers
+            } : e))
+          }));
+        } else {
+          setTimeout(() => get().retryMetadata(eventId, ipfsHash), 30000);
+        }
+      },
+
+      fetchEventsFromChain: async () => {
+        if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") return;
+        set({ isLoading: true });
         try {
-          const parsedLog = contract.interface.parseLog(log as any);
-          const eventId = parsedLog?.args?.eventId || (log as any).args?.[0];
-          eventIdForCatch = eventId ? eventId.toString() : null;
-          const logOrganiser = parsedLog?.args?.organiser || (log as any).args?.[1];
-          const ipfsHash = parsedLog?.args?.ipfsHash || (log as any).args?.[2];
+          const provider = getReadProvider();
+          const contract = new ethers.Contract(config.contractAddress, ABI, provider);
+          const nextEventId = await contract.nextEventId();
+          const totalEvents = Number(nextEventId) - 1;
 
-          if (!eventId) return null;
+          const onChainData = await Promise.all(
+            Array.from({ length: totalEvents }, (_, i) => contract.fetchEventData(i + 1))
+          );
 
-          const evt = await contract.fetchEventData(eventId);
-
-
-          if (evt.exists || evt[4]) {
-            let title = "Unknown Event";
-            let location = "Unknown Location";
-            // Default to a future date so events with failed metadata don't appear as 'past'
-            let date = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-            let description = "No description available.";
-            let category = "Uncategorized";
-            let hasIpfsError = false;
-            let imageUrl: string | undefined = undefined;
-
-            if (ipfsHash) {
-              const cid = extractCid(ipfsHash) || ipfsHash;
-              let fetched = false;
-
-              for (const gateway of IPFS_GATEWAYS) {
-                try {
-                  const url = `${gateway}/${cid}`;
-                  const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 10000);
-                  const res = await fetch(url, { signal: controller.signal });
-                  clearTimeout(timeoutId);
-
-                  if (res.ok) {
-                    const metadata = await res.json();
-                    title = metadata.name || title;
-                    location = metadata.location || location;
-                    date = metadata.date || date;
-                    description = metadata.description || description;
-                    category = metadata.category || category;
-                    imageUrl = metadata.image || undefined;
-                    fetched = true;
-                    break;
-                  }
-                } catch (e) {
-                  // Ignore and try next gateway
-                }
-              }
-
-              if (!fetched) {
-                console.warn("All IPFS gateways failed for event", eventId);
-                hasIpfsError = true;
-              }
-            } else {
-               hasIpfsError = true;
+          const currentEvents = get().events;
+          const updatedEvents: Event[] = onChainData.map((evt, idx) => {
+            const i = idx + 1;
+            const eventId = `evt_${i}`;
+            const existing = currentEvents.find(e => e.id === eventId);
+            const onChainTotalSold = Number(evt.ticketsSold || evt[2]);
+            
+            if (existing && !existing.description.includes("Loading")) {
+              return { ...existing, tiers: existing.tiers.map((t, tidx) => ({ ...t, sold: tidx === 0 ? onChainTotalSold : t.sold })) };
             }
 
-            const eventDate = new Date(date);
-            // If IPFS failed, always treat as active so the event remains visible
-            const isExpired = hasIpfsError ? false : eventDate < new Date();
-
             return {
-              id: `evt_${eventId.toString()}`,
-              title: hasIpfsError ? title + " ⚠️ (Metadata Unavailable)" : title,
-              description,
-              date,
-              location,
-              category,
-              hasIpfsError,
-              imageUrl,
-              organizerId: evt.organiser || evt[5] || logOrganiser,
-              royaltyBps: Number(evt.royaltyBps || evt[3]),
-              status: isExpired ? 'past' : 'active',
-              tiers: [
-                {
-                  id: `tier_evt_${eventId.toString()}`,
-                  name: 'General Access',
-                  price: parseFloat(ethers.formatEther(evt.priceWei || evt[1])),
-                  supply: Number(evt.maxTickets || evt[0]),
-                  sold: Number(evt.ticketsSold || evt[2])
-                }
-              ]
-            } as Event;
-          }
-        } catch (e) {
-          console.error(`Sync error for event ID ${eventIdForCatch || 'unknown'}:`, e);
+              id: eventId,
+              title: `Event #${i}`,
+              description: "Loading details from IPFS...",
+              date: "2099-12-31T00:00:00.000Z",
+              location: "Loading location...",
+              category: "Other",
+              organizerId: (evt.organiser || evt[3]).toLowerCase(),
+              royaltyBps: Number(evt.royaltyBps || evt[4]),
+              status: 'active',
+              hasIpfsError: true,
+              tiers: [{ id: `tier_${eventId}_0`, name: 'General Access', price: parseFloat(ethers.formatEther(evt.priceWei || evt[1])), supply: Number(evt.maxTickets || evt[0]), sold: onChainTotalSold }]
+            };
+          });
+
+          set({ events: dedupeEvents([...updatedEvents, ...currentEvents]), isLoading: false });
+
+          updatedEvents.forEach(e => {
+            if (e.description.includes("Loading")) {
+              const onChain = onChainData[parseInt(e.id.split('_')[1]) - 1];
+              const hash = onChain?.ipfsHash || onChain?.[6];
+              if (hash) get().retryMetadata(e.id, hash);
+            }
+          });
+        } catch (err) {
+          set({ isLoading: false });
         }
-        return null;
-      });
-
-      const resolvedEvents = await Promise.all(eventPromises);
-      const loadedEvents = resolvedEvents.filter((ev): ev is Event => ev !== null);
-
-      set({ events: loadedEvents, isLoading: false });
-      console.log("Blockchain sync complete.");
-    } catch (err) {
-      console.error('fetchEventsFromChain failed:', err);
-      set({ isLoading: false });
-    }
-  }
-}));
+      }
+    }),
+    { name: `netix_event_storage_${config.contractAddress.toLowerCase()}` }
+  )
+);

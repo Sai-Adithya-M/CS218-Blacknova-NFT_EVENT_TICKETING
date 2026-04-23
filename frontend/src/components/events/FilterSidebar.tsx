@@ -17,7 +17,7 @@ interface FilterSidebarProps {
 }
 
 export const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters }) => {
-  const categories = ['All', 'Music', 'Web3', 'Conference', 'Sports', 'Art'];
+  const categories = ['All', 'Music', 'Tech & Crypto', 'Digital Art', 'Sports & Gaming', 'Conference'];
 
   const handleReset = () => {
     setFilters({

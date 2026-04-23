@@ -4,46 +4,30 @@ import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, Loader2 } from 'lucide-react';
 import { AuthFallback } from '../components/ui/AuthFallback';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ethers } from 'ethers';
 import { config } from '../config';
-import { FALLBACK_IMG, IPFS_GATEWAYS, extractCid } from '../utils/ipfs';
+import { useIPFSImage } from '../hooks/useIPFSImage';
 
-// Tries each IPFS gateway in turn before falling back to FALLBACK_IMG
 const BannerImage: React.FC<{ src?: string; alt: string; className?: string }> = ({ src, alt, className }) => {
-  const cid = src ? extractCid(src) : null;
-  const urls = cid
-    ? IPFS_GATEWAYS.map(gw => `${gw}/${cid}`)
-    : src ? [src] : [];
-  const [idx, setIdx] = React.useState(0);
-  const currentSrc = urls[idx] || FALLBACK_IMG;
-
-  const handleError = () => {
-    if (idx < urls.length - 1) {
-      setIdx(i => i + 1);
-    } else {
-      // All gateways exhausted, show fallback
-      setIdx(urls.length); // sentinel so we don't retry
-    }
-  };
+  const { src: currentSrc, loading } = useIPFSImage(src);
 
   return (
     <img
-      src={idx >= urls.length ? FALLBACK_IMG : currentSrc}
+      src={currentSrc}
       alt={alt}
-      className={className}
-      onError={handleError}
+      className={`${className} transition-all duration-700 ${loading ? 'blur-sm grayscale' : 'blur-0 grayscale-0'}`}
     />
   );
 };
 
 const CONTRACT_ABI = [
-  "function listForResale(uint tokenId, uint priceWei) public",
-  "function cancelResaleListing(uint tokenId) public"
+  "function listForResale(uint256 tokenId, uint256 priceWei) external",
+  "function cancelResaleListing(uint256 tokenId) external"
 ];
 
 export const MyTickets: React.FC = () => {
-  const { tickets, isLoading: isTicketsLoading, listForResale, cancelResale } = useTicketStore();
+  const { tickets, isLoading: isTicketsLoading, listTicketForResale, cancelResale } = useTicketStore();
   const { events, isLoading: isEventsLoading } = useEventStore();
   const { user } = useAuthStore();
   const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
@@ -57,7 +41,11 @@ export const MyTickets: React.FC = () => {
 
   const filteredTickets = myTickets.filter(ticket => {
     const event = events.find(e => e.id === ticket.eventId);
-    const isPast = event ? new Date(event.date) < new Date() : false;
+    if (!event) return activeTab === 'active'; // Don't hide if event is still loading
+    
+    const eventDate = new Date(event.date);
+    const isPast = !isNaN(eventDate.getTime()) && eventDate < new Date();
+    
     return activeTab === 'active' ? !isPast : isPast;
   });
 
@@ -74,7 +62,7 @@ export const MyTickets: React.FC = () => {
       const priceWei = ethers.parseEther(price.toString());
       const tx = await contract.listForResale(ticket.tokenId, priceWei);
       await tx.wait();
-      listForResale(ticket.id, price);
+      listTicketForResale(ticket.id, price);
       setActiveResaleId(null);
       setResaleInputs(prev => { const next = { ...prev }; delete next[ticket.id]; return next; });
     } catch (err: any) {
@@ -119,6 +107,34 @@ export const MyTickets: React.FC = () => {
       variants={containerVariants}
       className="px-12 pt-32 pb-12"
     >
+      <AnimatePresence>
+        {processingId && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 20 }}
+              className="relative w-full max-w-md rounded-3xl border border-white/10 bg-[#0a0a0f]/98 backdrop-blur-2xl shadow-2xl p-10 text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-[var(--accent-purple)]/10 border border-[var(--accent-purple)]/30 flex items-center justify-center mx-auto mb-6">
+                <Loader2 size={32} className="text-[var(--accent-purple)] animate-spin" />
+              </div>
+              <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">Processing Ticket…</h3>
+              <p className="text-white/50 text-sm font-medium">Updating marketplace listing on Sepolia Testnet.</p>
+              <div className="mt-6 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest text-white/30">
+                <span className="w-2 h-2 rounded-full bg-[var(--accent-purple)] animate-pulse" />
+                Processing on-chain
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <motion.div variants={itemVariants} className="flex flex-col md:flex-row items-start md:items-center justify-between gap-8 mb-16">
         <div>
           <h2 className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">Your Assets</h2>
@@ -240,6 +256,11 @@ export const MyTickets: React.FC = () => {
                           Purchased {purchaseDate.toLocaleDateString()}
                         </span>
                       </div>
+                      {event?.description && (
+                        <p className="mt-3 text-xs text-white/60 line-clamp-2 leading-relaxed">
+                          {event.description}
+                        </p>
+                      )}
                     </div>
 
                     {/* Price + QR + actions */}

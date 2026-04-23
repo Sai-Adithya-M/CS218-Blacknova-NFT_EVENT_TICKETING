@@ -52,14 +52,14 @@ export const Login: React.FC = () => {
       <div className="auth-card glass" style={{ maxWidth: '540px' }}>
         <div className="auth-logo">
           <Sparkles className="text-accent" size={32} />
-          <span><span className="text-accent">Nif</span>ting</span>
+          <span><span className="text-accent">Nex</span>ting</span>
         </div>
         
         <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Welcome to the Future</h1>
         <p className="text-muted" style={{ marginBottom: '2rem' }}>Sign in to manage your immersive event experiences.</p>
         
         <div className="input-group" style={{ marginBottom: '2rem', textAlign: 'left' }}>
-          <label className="input-label" style={{ marginBottom: '1rem', display: 'block', textAlign: 'center' }}>How do you want to use Nifting?</label>
+          <label className="input-label" style={{ marginBottom: '1rem', display: 'block', textAlign: 'center' }}>How do you want to use Nexting?</label>
           <div className="role-grid">
             <div 
               className={`role-box ${roleSelect === 'buyer' ? 'active' : ''}`}

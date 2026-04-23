@@ -1,21 +1,30 @@
 import React, { useState } from 'react';
-import { X, Calendar, MapPin, Users, Tag, ShieldCheck, ExternalLink, Loader2, CheckCircle, AlertCircle, Wallet } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Event, TicketTier } from '../../store/useEventStore';
+import { 
+  X, Calendar, MapPin, Tag, Wallet, 
+  Loader2, CheckCircle, Plus, Minus, ShoppingBag
+} from 'lucide-react';
+import type { Event } from '../../store/useEventStore';
 import { useEventStore } from '../../store/useEventStore';
 import { useTicketStore } from '../../store/useTicketStore';
 import { useAuthStore } from '../../store/useAuthStore';
-import { LoginModal } from '../ui/LoginModal';
 import { config } from '../../config';
 import { ethers } from 'ethers';
-import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../../utils/ipfs';
+import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
-  "function buyTicket(uint eventId) public payable",
-  "function buyResaleTicket(uint tokenId) public payable",
-  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer)",
+  "function buyTicket(uint256 eventId, uint256 quantity, uint8 tier) public payable",
+  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint256[] memory quantities) public payable",
+  "function buyResaleTicket(uint256 tokenId) public payable",
+  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)",
   "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei)"
 ];
+
+const TIER_NAME_TO_INDEX: Record<string, number> = {
+  'Silver': 0,
+  'Gold': 1,
+  'VIP': 2
+};
 
 interface EventDetailModalProps {
   event: Event | null;
@@ -23,39 +32,23 @@ interface EventDetailModalProps {
   onClose: () => void;
 }
 
-type Step = 'details' | 'confirming' | 'success' | 'error';
 type MarketType = 'primary' | 'secondary';
+type Step = 'details' | 'confirming' | 'success' | 'error';
 
 export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpen, onClose }) => {
-  const [selectedTier, setSelectedTier] = useState<TicketTier | null>(null);
-  const [quantity, setQuantity] = useState(1);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [selectedResaleTicket, setSelectedResaleTicket] = useState<any>(null);
   const [marketType, setMarketType] = useState<MarketType>('primary');
   const [step, setStep] = useState<Step>('details');
   const [purchasedTokenId, setPurchasedTokenId] = useState('');
   const [purchasedTxHash, setPurchasedTxHash] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
 
   const { buyTicket, buyResaleTicket: storeBuyResale, tickets } = useTicketStore();
   const { incrementTierSold } = useEventStore();
-  const { user, isAuthenticated, updateWallet } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
 
-  // Hook must be called unconditionally (before any early return)
-  const [modalGwIndex, setModalGwIndex] = useState(0);
-
-  const cid = extractCid(event?.imageUrl || '');
-  const gateways = IPFS_GATEWAYS;
-  
-  const modalImageSrc = cid
-    ? `${gateways[modalGwIndex]}/${cid}`
-    : (event?.imageUrl || FALLBACK_IMG);
-    
-  const handleModalImgError = React.useCallback(() => {
-    if (cid && modalGwIndex < gateways.length - 1) {
-      setModalGwIndex(prev => prev + 1);
-    }
-  }, [cid, modalGwIndex, gateways.length]);
+  const { src: modalImageSrc } = useIPFSImage(event?.imageUrl);
   const resaleTickets = tickets.filter(t => t.eventId === event?.id && t.status === 'resale');
 
   if (!isOpen || !event) return null;
@@ -63,147 +56,109 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const date = new Date(event.date);
   const isOrganizer = user?.id?.toLowerCase() === event.organizerId?.toLowerCase();
 
+  const getTierQuantity = (tierId: string) => quantities[tierId] || 0;
+  
+  const updateTierQuantity = (tierId: string, delta: number, max: number) => {
+    const current = getTierQuantity(tierId);
+    const next = Math.max(0, Math.min(max, current + delta));
+    setQuantities(prev => ({ ...prev, [tierId]: next }));
+  };
+
+  const totalQuantity = Object.values(quantities).reduce((sum: number, q: number) => sum + q, 0) as number;
+  const totalPrice = event.tiers.reduce((sum: number, tier) => sum + (tier.price * getTierQuantity(tier.id)), 0) as number;
+
   const handleClose = () => {
     setStep('details');
-    setSelectedTier(null);
+    setQuantities({});
     setErrorMsg('');
     onClose();
   };
 
   const handlePurchase = async () => {
     if (!isAuthenticated || !user) {
-      setIsLoginOpen(true);
+      alert("Please connect your wallet first.");
       return;
     }
-
-    if (!selectedTier) return;
-
+    if (totalQuantity === 0) return;
     if (isOrganizer) {
       setErrorMsg("Organisers cannot purchase tickets for their own events.");
       setStep('error');
       return;
     }
-
-    const remaining = selectedTier.supply - selectedTier.sold;
-    if (quantity > remaining) {
-      setErrorMsg(`Only ${remaining} tickets remaining.`);
-      setStep('error');
-      return;
-    }
-
-    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      setErrorMsg('Contract not connected. Please set VITE_CONTRACT_ADDRESS.');
-      setStep('error');
-      return;
-    }
-
     setStep('confirming');
-
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
-
-      // Ensure correct network
-      const network = await provider.getNetwork();
-      if (network.chainId !== BigInt(config.sepoliaChainId)) {
-        await (window as any).ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0xaa36a7' }],
-        });
-      }
-
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      const priceWei = ethers.parseEther(selectedTier.price.toString());
-
-      // Trigger real blockchain transaction
-      // Assuming event.id is the numeric ID from the blockchain (synced in ManageEvents)
+      const totalValue = ethers.parseEther(totalPrice.toFixed(18));
       const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1;
-      const tx = await contract.buyTicket(numericEventId, { value: priceWei });
+      
+      const tierIndices: number[] = [];
+      const tierQtys: number[] = [];
+      
+      event.tiers.forEach(tier => {
+        const q = getTierQuantity(tier.id);
+        if (q > 0) {
+          const idx = TIER_NAME_TO_INDEX[tier.name] ?? 0;
+          tierIndices.push(idx);
+          tierQtys.push(q);
+        }
+      });
+
+      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
       const receipt = await tx.wait();
 
-      // Find TokenID from logs
-      let tokenId = `NFT_${Date.now()}`;
+      const mintedIds: string[] = [];
       if (receipt && receipt.logs) {
-        try {
-          const log = receipt.logs.find((l: any) => {
-            try {
-              return contract.interface.parseLog(l)?.name === 'TicketMinted';
-            } catch { return false; }
-          });
-          if (log) {
+        receipt.logs.forEach((log: any) => {
+          try {
             const parsed = contract.interface.parseLog(log);
-            tokenId = parsed?.args?.tokenId?.toString() || tokenId;
-          }
-        } catch (e) {
-          console.warn("Log parsing failed", e);
-        }
+            if (parsed && parsed.name === 'TicketMinted') {
+              mintedIds.push(parsed.args.tokenId.toString());
+            }
+          } catch (e) {}
+        });
       }
 
-      buyTicket(event.id, user.id, selectedTier.name, selectedTier.price);
-      incrementTierSold(event.id, selectedTier.id);
-      updateWallet(-selectedTier.price);
+      let logIdx = 0;
+      event.tiers.forEach(tier => {
+        const q = getTierQuantity(tier.id);
+        for (let i = 0; i < q; i++) {
+          const tId = mintedIds[logIdx] || Date.now().toString() + i;
+          buyTicket(event.id, user.id, tier.name, tier.price, tId, receipt.hash);
+          incrementTierSold(event.id, tier.id);
+          logIdx++;
+        }
+      });
 
-      setPurchasedTokenId(tokenId);
+      setPurchasedTokenId(mintedIds.length > 0 ? mintedIds[0] : "Multiple");
       setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
       console.error("Purchase failed:", err);
-      setErrorMsg(err.message || 'Transaction failed. Please try again.');
+      setErrorMsg(err.reason || err.message || 'Transaction failed.');
       setStep('error');
     }
   };
 
   const handleBuyResale = async () => {
-    if (!isAuthenticated || !user) {
-      setIsLoginOpen(true);
-      return;
-    }
-
-    if (isOrganizer) {
-      setErrorMsg("Organisers cannot purchase tickets for their own events.");
-      setStep('error');
-      return;
-    }
-
+    if (!isAuthenticated || !user) { alert("Please connect wallet."); return; }
     if (!selectedResaleTicket) return;
-
-    // Get the tickets to buy (cheapest N from the selected tier)
-    const availableFromTier = resaleTickets
-      .filter(t => t.tierName === selectedResaleTicket?.tierName)
-      .sort((a, b) => (a.resalePrice || 0) - (b.resalePrice || 0))
-      .slice(0, quantity);
-
-    if (availableFromTier.length === 0) return;
-
-    const ticketToBuy = availableFromTier[0];
-
-    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      setErrorMsg('Contract not connected.');
-      setStep('error');
-      return;
-    }
-
     setStep('confirming');
-
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
-
-      const priceWei = ethers.parseEther(ticketToBuy.resalePrice.toString());
-
-      const tx = await contract.buyResaleTicket(ticketToBuy.tokenId, { value: priceWei });
+      const priceWei = ethers.parseEther(selectedResaleTicket.resalePrice.toString());
+      const tx = await contract.buyResaleTicket(selectedResaleTicket.tokenId, { value: priceWei });
       const receipt = await tx.wait();
-
-      storeBuyResale(ticketToBuy.id, user.id, ticketToBuy.resalePrice);
-
-      setPurchasedTokenId(ticketToBuy.tokenId);
+      storeBuyResale(selectedResaleTicket.id, user.id, selectedResaleTicket.resalePrice);
+      setPurchasedTokenId(selectedResaleTicket.tokenId);
       setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
-      console.error("Resale purchase failed:", err);
-      setErrorMsg(err.message || 'Transaction failed.');
+      setErrorMsg(err.message || 'Resale failed.');
       setStep('error');
     }
   };
@@ -211,310 +166,109 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const truncate = (hash: string) => `${hash.slice(0, 10)}...${hash.slice(-8)}`;
 
   return (
-    <>
-      <AnimatePresence>
-        {isOpen && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-              onClick={handleClose}
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 20 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#0a0a0f]/98 backdrop-blur-2xl shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Close */}
-              <button
-                onClick={handleClose}
-                className="absolute top-5 right-5 z-10 w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-all"
-              >
-                <X size={18} />
-              </button>
-
-              {/* ── DETAILS / TIER SELECT ── */}
-              {step === 'details' && (
-                <div>
-                  {/* Event Header */}
-                  <div className="relative h-48 rounded-t-3xl overflow-hidden">
-                    <img
-                      src={event.imageUrl || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80'}
-                      alt={event.title}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/50 to-transparent" />
-                    <div className="absolute bottom-0 left-0 p-6">
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3">
-                        <ShieldCheck size={10} /> Verified On-Chain
-                      </span>
-                      <h2 className="text-2xl font-black uppercase tracking-tight italic">{event.title}</h2>
-                    </div>
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={handleClose} />
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#0a0a0f] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={handleClose} className="absolute top-5 right-5 z-10 w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-all"><X size={18} /></button>
+            {step === 'details' && (
+              <div className="pb-8">
+                <div className="relative h-56 overflow-hidden">
+                  <img src={modalImageSrc} alt={event.title} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
+                  <div className="absolute bottom-6 left-6">
+                    <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3 inline-block">Verified Event</span>
+                    <h2 className="text-3xl font-black uppercase tracking-tight italic text-white">{event.title}</h2>
                   </div>
-
-                  <div className="p-6 space-y-6">
-                    {/* Meta */}
-                    <div className="flex flex-wrap items-center gap-4 text-[11px] font-bold text-white/50">
-                      <span className="flex items-center gap-1.5"><Calendar size={12} className="text-[var(--accent-purple)]" />{date.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</span>
-                      <span className="flex items-center gap-1.5"><MapPin size={12} className="text-[var(--accent-teal)]" />{event.location}</span>
-                      <span className="flex items-center gap-1.5"><Tag size={12} />{event.category}</span>
-                      <span className="flex items-center gap-1.5 text-[var(--accent-teal)]"><ShieldCheck size={12} />{event.royaltyBps.toFixed(1)}% Royalty</span>
-                    </div>
-
-                    <p className="text-sm text-white/60 leading-relaxed">{event.description}</p>
-
-                    {/* Market Type Toggle */}
-                    <div className="flex p-1 rounded-xl bg-white/5 border border-white/10">
-                      <button
-                        onClick={() => setMarketType('primary')}
-                        className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'primary' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
-                      >
-                        Primary Sale
-                      </button>
-                      <button
-                        onClick={() => setMarketType('secondary')}
-                        className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'secondary' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
-                      >
-                        Secondary Market ({resaleTickets.length})
-                      </button>
-                    </div>
-
-                    {/* Contract Check Warning */}
-                    {(config.contractAddress === "0x0000000000000000000000000000000000000000") && (
-                      <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center gap-3">
-                        <AlertCircle className="text-red-400 shrink-0" size={18} />
-                        <p className="text-[10px] font-bold text-red-200 uppercase tracking-widest leading-relaxed">
-                          Contract not connected. Please set <code className="text-white">VITE_CONTRACT_ADDRESS</code> to enable purchases.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Tier Selector (Primary) */}
-                    {marketType === 'primary' && (
-                      <div>
-                        <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] mb-4 italic">Select Ticket Tier</h3>
-                        <div className="space-y-3">
-                          {event.tiers.map(tier => {
-                            const isSoldOut = tier.sold >= tier.supply;
-                            const isSelected = selectedTier?.id === tier.id;
-                            return (
-                              <button
-                                key={tier.id}
-                                disabled={isSoldOut}
-                                onClick={() => setSelectedTier(tier)}
-                                className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${isSoldOut
-                                    ? 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
-                                    : isSelected
-                                      ? 'border-[var(--accent-purple)]/50 bg-[var(--accent-purple)]/10'
-                                      : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
-                                  }`}
-                              >
+                </div>
+                <div className="p-8 space-y-8">
+                  <div className="flex flex-wrap gap-6 text-[11px] font-bold text-white/40 uppercase tracking-widest">
+                    <span className="flex items-center gap-2"><Calendar size={14} className="text-[var(--accent-purple)]" /> {date.toLocaleDateString()}</span>
+                    <span className="flex items-center gap-2"><MapPin size={14} className="text-[var(--accent-teal)]" /> {event.location}</span>
+                    <span className="flex items-center gap-2"><Tag size={14} /> {event.category}</span>
+                  </div>
+                  <p className="text-sm text-white/60 leading-relaxed">{event.description}</p>
+                  <div className="flex p-1.5 rounded-2xl bg-white/5 border border-white/10">
+                    <button onClick={() => setMarketType('primary')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'primary' ? 'bg-white text-black shadow-xl' : 'text-white/30 hover:text-white'}`}>Primary Sale</button>
+                    <button onClick={() => setMarketType('secondary')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${marketType === 'secondary' ? 'bg-white text-black shadow-xl' : 'text-white/30 hover:text-white'}`}>Resale Market ({resaleTickets.length})</button>
+                  </div>
+                  {marketType === 'primary' ? (
+                    <div className="space-y-4">
+                      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">Available Tiers</h3>
+                      <div className="grid gap-3">
+                        {event.tiers.map((tier) => {
+                          const q = getTierQuantity(tier.id);
+                          const isSoldOut = tier.sold >= tier.supply;
+                          return (
+                            <div key={tier.id} className={`flex flex-col p-5 rounded-2xl border transition-all ${q > 0 ? 'border-[var(--accent-purple)] bg-[var(--accent-purple)]/10 shadow-lg shadow-purple-500/10' : isSoldOut ? 'opacity-30 border-white/5' : 'border-white/10 bg-white/5'}`}>
+                              <div className="flex items-center justify-between mb-4">
                                 <div>
-                                  <p className="font-black uppercase tracking-tight italic">{tier.name}</p>
-                                  <p className="text-[11px] text-white/40 font-bold mt-0.5">
-                                    <Users size={10} className="inline mr-1" />
-                                    {tier.sold}/{tier.supply} sold
-                                    {isSoldOut && <span className="ml-2 text-red-400">SOLD OUT</span>}
-                                  </p>
+                                  <p className="font-black uppercase tracking-tight italic text-sm text-white">{tier.name}</p>
+                                  <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">{tier.sold} / {tier.supply} Sold</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">
-                                    {tier.price} ETH
-                                  </p>
+                                  <p className="text-sm font-black text-[var(--accent-teal)]">{tier.price} ETH</p>
+                                  {q > 0 && <p className="text-[9px] font-black text-white/40 mt-1 uppercase tracking-widest">Sub: {(tier.price * q).toFixed(3)} ETH</p>}
                                 </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Resale Market (Secondary) */}
-                    {marketType === 'secondary' && (
-                      <div className="space-y-6">
-                        <div>
-                          <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] mb-4 italic">Select Resale Type</h3>
-                          <div className="space-y-3">
-                            {Object.entries(
-                              resaleTickets.reduce((acc, t) => {
-                                if (!acc[t.tierName]) {
-                                  const tier = event.tiers.find(tr => tr.name === t.tierName);
-                                  acc[t.tierName] = { 
-                                    count: 0, 
-                                    minPrice: Infinity, 
-                                    originalPrice: tier ? tier.price : 0,
-                                    example: t 
-                                  };
-                                }
-                                acc[t.tierName].count++;
-                                const price = t.resalePrice || Infinity;
-                                if (price < acc[t.tierName].minPrice) {
-                                  acc[t.tierName].minPrice = price;
-                                  acc[t.tierName].example = t;
-                                }
-                                return acc;
-                              }, {} as Record<string, { count: number, minPrice: number, originalPrice: number, example: any }>)
-                            ).map(([tierName, data]) => (
-                              <button
-                                key={tierName}
-                                onClick={() => {
-                                  setSelectedResaleTicket(data.example);
-                                  setQuantity(1);
-                                }}
-                                className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
-                                  selectedResaleTicket?.tierName === tierName
-                                    ? 'border-[var(--accent-teal)]/50 bg-[var(--accent-teal)]/10'
-                                    : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20'
-                                }`}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="flex flex-col">
-                                    <p className="font-black uppercase tracking-tight italic">{tierName}</p>
-                                    <div className="flex items-center gap-1.5 text-[9px] text-white/30 font-bold uppercase tracking-widest mt-1">
-                                      <span>Original</span>
-                                      <span className="line-through">{data.originalPrice} ETH</span>
-                                    </div>
-                                  </div>
-                                  <div className="w-px h-10 bg-white/10" />
-                                  <div className="flex-1">
-                                    <p className="text-[11px] text-white/40 font-bold">
-                                      <Users size={10} className="inline mr-1" />
-                                      {data.count} listed
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-[9px] text-[var(--accent-teal)] font-black uppercase mb-0.5 tracking-widest">Resale From</p>
-                                  <p className="text-xl font-black text-[var(--accent-teal)]">
-                                    {data.minPrice} ETH
-                                  </p>
-                                </div>
-                              </button>
-                            ))}
-                            {resaleTickets.length === 0 && (
-                              <div className="py-12 text-center rounded-3xl border border-dashed border-white/5 bg-white/[0.01]">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-white/20 italic">No tickets listed for resale.</p>
                               </div>
-                            )}
-                          </div>
-                        </div>
+                              {!isSoldOut && !isOrganizer && (
+                                <div className="flex items-center justify-center gap-6 pt-2 border-t border-white/5">
+                                  <button onClick={() => updateTierQuantity(tier.id, -1, 10)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Minus size={14} /></button>
+                                  <span className="w-4 text-center font-black italic text-white text-base">{q}</span>
+                                  <button onClick={() => updateTierQuantity(tier.id, 1, Math.min(10, tier.supply - tier.sold))} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Plus size={14} /></button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    )}
-
-                    {/* Purchase Button */}
-                    <div className="space-y-3">
-                      {isOrganizer ? (
-                        <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-center">
-                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 italic">
-                            Organiser Management Mode
-                          </p>
-                          <p className="text-[9px] font-bold text-white/20 mt-1 uppercase tracking-widest">
-                            You cannot purchase tickets for your own event
-                          </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic">Secondary Listings</h3>
+                      {resaleTickets.length > 0 ? (
+                        <div className="grid gap-3">
+                          {resaleTickets.map((t) => (
+                            <button key={t.id} onClick={() => setSelectedResaleTicket(t)} className={`flex items-center justify-between p-5 rounded-2xl border transition-all text-left ${selectedResaleTicket?.id === t.id ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 shadow-lg shadow-teal-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
+                              <div>
+                                <p className="font-black uppercase tracking-tight italic text-sm text-white">{t.tierName}</p>
+                                <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">Token #{t.tokenId.slice(-6)}</p>
+                              </div>
+                              <p className="text-sm font-black text-white">{t.resalePrice} ETH</p>
+                            </button>
+                          ))}
                         </div>
                       ) : (
-                        <motion.button
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                          disabled={marketType === 'primary' ? !selectedTier : !selectedResaleTicket}
-                          onClick={marketType === 'primary' ? handlePurchase : handleBuyResale}
-                          className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all ${(marketType === 'primary' ? selectedTier : selectedResaleTicket)
-                              ? 'bg-white text-black shadow-2xl hover:shadow-white/20'
-                              : 'bg-white/10 text-white/30 cursor-not-allowed'
-                            }`}
-                        >
-                          <Wallet size={16} />
-                          {marketType === 'primary'
-                            ? (selectedTier ? `Purchase ${selectedTier.name} — ${selectedTier.price} ETH` : 'Select a tier to continue')
-                            : (selectedResaleTicket ? `Buy Resale Ticket — ${selectedResaleTicket.resalePrice} ETH` : 'Select a ticket to buy')
-                          }
-                        </motion.button>
+                        <div className="p-10 text-center rounded-2xl bg-white/5 border border-dashed border-white/10">
+                          <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest italic">No active listings</p>
+                        </div>
                       )}
                     </div>
+                  )}
+                  <div className="pt-4 space-y-4">
+                    {marketType === 'primary' && totalQuantity > 0 && (
+                      <div className="flex items-center justify-between p-6 rounded-2xl bg-[var(--accent-teal)]/5 border border-[var(--accent-teal)]/20">
+                        <div><p className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)] mb-1">Total Cart Value</p><p className="text-2xl font-black text-white italic">{totalPrice.toFixed(3)} ETH</p></div>
+                        <div className="text-right"><p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30 mb-1">Items</p><p className="text-lg font-black text-white/60">{totalQuantity} Tickets</p></div>
+                      </div>
+                    )}
+                    {!isOrganizer && (
+                      <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }} disabled={marketType === 'primary' ? totalQuantity === 0 : !selectedResaleTicket} onClick={marketType === 'primary' ? handlePurchase : handleBuyResale} className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center gap-3 transition-all ${(marketType === 'primary' ? totalQuantity > 0 : selectedResaleTicket) ? 'bg-white text-black shadow-xl hover:bg-[var(--accent-teal)] hover:text-white' : 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'}`}>
+                        {marketType === 'primary' ? <ShoppingBag size={16} /> : <Wallet size={16} />}
+                        {marketType === 'primary' ? (totalQuantity > 0 ? `Checkout ( ${totalPrice.toFixed(3)} ETH )` : 'Select Tickets') : 'Buy Resale Ticket'}
+                      </motion.button>
+                    )}
                   </div>
                 </div>
-              )}
-
-              {/* ── CONFIRMING ── */}
-              {step === 'confirming' && (
-                <div className="p-10 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-[var(--accent-purple)]/10 border border-[var(--accent-purple)]/30 flex items-center justify-center mx-auto mb-6">
-                    <Loader2 size={32} className="text-[var(--accent-purple)] animate-spin" />
-                  </div>
-                  <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">Confirming Transaction…</h3>
-                  <p className="text-white/50 text-sm font-medium">Minting your NFT ticket on Sepolia Testnet.</p>
-                  <div className="mt-6 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest text-white/30">
-                    <span className="w-2 h-2 rounded-full bg-[var(--accent-purple)] animate-pulse" />
-                    Processing on-chain
-                  </div>
-                </div>
-              )}
-
-              {/* ── SUCCESS ── */}
-              {step === 'success' && (
-                <div className="p-10 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 flex items-center justify-center mx-auto mb-6">
-                    <CheckCircle size={32} className="text-[var(--accent-teal)]" />
-                  </div>
-                  <h3 className="text-xl font-black uppercase tracking-tight italic mb-2">Ticket Purchased!</h3>
-                  <p className="text-white/50 text-sm font-medium mb-6">Your NFT ticket has been minted successfully.</p>
-
-                  <div className="space-y-3 text-left max-w-sm mx-auto">
-                    <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                      <p className="text-[9px] uppercase tracking-widest font-bold text-white/40 mb-1">Token ID</p>
-                      <p className="text-xs font-mono font-bold text-white break-all">{purchasedTokenId}</p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                      <p className="text-[9px] uppercase tracking-widest font-bold text-white/40 mb-1">Transaction Hash</p>
-                      <p className="text-xs font-mono font-bold text-white">{truncate(purchasedTxHash)}</p>
-                    </div>
-                    <a
-                      href={`https://sepolia.etherscan.io/tx/${purchasedTxHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[11px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
-                    >
-                      <ExternalLink size={13} /> View on Etherscan
-                    </a>
-                  </div>
-
-                  <button
-                    onClick={handleClose}
-                    className="mt-6 w-full max-w-sm mx-auto block py-3 rounded-xl bg-white text-black font-black uppercase tracking-widest text-xs"
-                  >
-                    Done
-                  </button>
-                </div>
-              )}
-
-              {/* ── ERROR ── */}
-              {step === 'error' && (
-                <div className="p-10 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center mx-auto mb-6">
-                    <AlertCircle size={32} className="text-red-400" />
-                  </div>
-                  <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">Transaction Failed</h3>
-                  <p className="text-white/60 text-sm font-medium mb-6">{errorMsg}</p>
-                  <button
-                    onClick={() => setStep('details')}
-                    className="px-8 py-3 rounded-xl border border-white/10 text-white/60 font-black uppercase tracking-widest text-xs hover:bg-white/5 transition-all"
-                  >
-                    Try Again
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-      <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} />
-    </>
+              </div>
+            )}
+            {step === 'confirming' && <div className="p-20 text-center"><Loader2 size={48} className="text-[var(--accent-purple)] animate-spin mx-auto mb-8" /><h3 className="text-2xl font-black uppercase tracking-tight italic mb-3 text-white">Processing…</h3><p className="text-white/40 text-sm">Please confirm the transaction in your wallet.</p></div>}
+            {step === 'success' && <div className="p-20 text-center"><CheckCircle size={48} className="text-[var(--accent-teal)] mx-auto mb-8" /><h3 className="text-2xl font-black uppercase tracking-tight italic mb-3 text-white">Success!</h3><p className="text-white/40 text-sm mb-10">Your tickets have been minted on-chain.</p><div className="space-y-3 text-left max-w-sm mx-auto mb-10"><div className="p-4 rounded-xl bg-white/5 border border-white/10"><p className="text-[9px] uppercase tracking-widest font-black text-white/30 mb-1">Primary Token ID</p><p className="text-xs font-mono font-black text-white">#{purchasedTokenId}</p></div><div className="p-4 rounded-xl bg-white/5 border border-white/10"><p className="text-[9px] uppercase tracking-widest font-black text-white/30 mb-1">Tx Hash</p><p className="text-xs font-mono font-black text-white">{truncate(purchasedTxHash)}</p></div></div><button onClick={handleClose} className="w-full max-w-xs py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-[10px] hover:bg-[var(--accent-teal)] hover:text-white transition-all shadow-xl">Done</button></div>}
+            {step === 'error' && <div className="p-20 text-center"><X size={48} className="text-red-500 mx-auto mb-8" /><h3 className="text-2xl font-black uppercase tracking-tight italic mb-3 text-red-500">Failed</h3><p className="text-white/40 text-sm mb-10 px-6">{errorMsg}</p><button onClick={() => setStep('details')} className="w-full max-w-xs py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-[10px] hover:bg-red-500 hover:text-white transition-all shadow-xl">Try Again</button></div>}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 };
-

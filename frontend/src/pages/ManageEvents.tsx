@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Trash2, Layers, Copy, Hash, ShieldCheck, ImageIcon, X as XIcon, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, Copy, Hash, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2 } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { AuthFallback } from '../components/ui/AuthFallback';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ethers } from 'ethers';
 import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
@@ -12,7 +13,7 @@ import { config } from '../config';
 import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory ipfsHash, uint32 maxTickets, uint256 priceWei, uint8 royaltyBps) external",
+  "function createEvent(string memory ipfsHash, uint256 maxTickets, uint256 priceWei, uint96 royaltyBps) external",
   "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
@@ -23,6 +24,7 @@ interface TierFormData {
 }
 
 export const ManageEvents: React.FC = () => {
+  const navigate = useNavigate();
   const { events, isLoading, createEvent } = useEventStore();
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
@@ -38,7 +40,7 @@ export const ManageEvents: React.FC = () => {
     description: '',
     date: '',
     location: '',
-    category: 'Music & Concerts',
+    category: 'Music',
     royalty: '5', // Default 5%
   });
 
@@ -49,9 +51,7 @@ export const ManageEvents: React.FC = () => {
 
   if (!user) return <AuthFallback />;
 
-  const addTier = () => {
-    setTiers([...tiers, { name: '', price: '', supply: '50' }]);
-  };
+
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -73,13 +73,20 @@ export const ManageEvents: React.FC = () => {
     }
   };
 
-  const removeTier = (index: number) => {
-    if (tiers.length <= 1) return;
-    setTiers(tiers.filter((_, i) => i !== index));
-  };
+
 
   const updateTier = (index: number, field: keyof TierFormData, value: string) => {
     setTiers(tiers.map((t, i) => i === index ? { ...t, [field]: value } : t));
+  };
+
+  const addTier = () => {
+    setTiers([...tiers, { name: '', price: '', supply: '100' }]);
+  };
+
+  const removeTier = (index: number) => {
+    if (tiers.length > 1) {
+      setTiers(tiers.filter((_, i) => i !== index));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -97,6 +104,16 @@ export const ManageEvents: React.FC = () => {
       }));
 
     setError(null);
+
+    const eventDateObj = new Date(formData.date);
+    const now = new Date();
+
+    // Compare dates by stripping seconds/milliseconds for a fairer comparison of "current" time
+    if (eventDateObj.getTime() < now.getTime() - 60000) { // Allow 1 minute grace period
+      setError("Event date cannot be in the past. Please select a future date.");
+      return;
+    }
+
     if (parsedTiers.length === 0) {
       setError("Please add at least one valid ticket tier.");
       return;
@@ -133,7 +150,7 @@ export const ManageEvents: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const basePriceWei = ethers.parseEther(lowestPrice.toString());
-      const royaltyBps = Math.floor(parseFloat(formData.royalty || '0'));
+      const royaltyBps = Math.floor(parseFloat(formData.royalty || '0') * 100);
 
       let imageUrl = '';
       if (imageFile) {
@@ -150,8 +167,9 @@ export const ManageEvents: React.FC = () => {
         location: formData.location || '',
         date: formData.date || new Date().toISOString(),
         description: formData.description || '',
-        category: formData.category || 'Music & Concerts',
-        image: imageUrl || undefined
+        category: formData.category || 'Music',
+        image: imageUrl || undefined,
+        tiers: parsedTiers
       };
 
       // Upload to IPFS
@@ -177,8 +195,9 @@ export const ManageEvents: React.FC = () => {
 
           if (eventCreatedLog) {
             const parsedLog = contract.interface.parseLog(eventCreatedLog);
-            if (parsedLog && parsedLog.args && parsedLog.args.eventId) {
-              blockchainEventId = parsedLog.args.eventId.toString();
+            if (parsedLog && parsedLog.args && (parsedLog.args.eventId || parsedLog.args[0])) {
+              const id = (parsedLog.args.eventId || parsedLog.args[0]).toString();
+              blockchainEventId = `evt_${id}`;
             }
           }
         } catch (err) {
@@ -186,20 +205,29 @@ export const ManageEvents: React.FC = () => {
         }
       }
 
+      const signerAddress = await signer.getAddress();
       createEvent({
         id: blockchainEventId,
-        title: formData.title,
-        description: formData.description,
-        date: new Date(formData.date).toISOString(),
-        location: formData.location,
-        category: formData.category,
-        organizerId: user.id,
+        title: metadataJSON.name,
+        description: metadataJSON.description,
+        date: metadataJSON.date,
+        location: metadataJSON.location,
+        category: metadataJSON.category,
+        organizerId: signerAddress,
         royaltyBps: royaltyBps,
-        tiers: parsedTiers,
+        status: 'active',
+        tiers: metadataJSON.tiers.map((t: any, idx: number) => ({
+          id: t.id || `tier_${blockchainEventId}_${idx}`,
+          name: t.name,
+          price: t.price,
+          supply: t.supply,
+          sold: 0
+        }))
       });
-
-      setIsCreating(false);
-      setFormData({ title: '', description: '', date: '', location: '', category: 'Music & Concerts', royalty: '5' });
+      
+      // Redirect to Marketplace after success
+      navigate('/events');
+      
       setTiers([{ name: 'General', price: '', supply: '100' }]);
       setImageFile(null);
       setImagePreview(null);
@@ -231,6 +259,34 @@ export const ManageEvents: React.FC = () => {
       variants={containerVariants}
       className="px-12 pt-32 pb-12"
     >
+      <AnimatePresence>
+        {isMining && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 20 }}
+              className="relative w-full max-w-md rounded-3xl border border-white/10 bg-[#0a0a0f]/98 backdrop-blur-2xl shadow-2xl p-10 text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 flex items-center justify-center mx-auto mb-6">
+                <Loader2 size={32} className="text-[var(--accent-teal)] animate-spin" />
+              </div>
+              <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">Minting Event…</h3>
+              <p className="text-white/50 text-sm font-medium">Deploying event contract on Sepolia Testnet.</p>
+              <div className="mt-6 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest text-white/30">
+                <span className="w-2 h-2 rounded-full bg-[var(--accent-teal)] animate-pulse" />
+                Processing on-chain
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       {isConfigMissing && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -289,13 +345,17 @@ export const ManageEvents: React.FC = () => {
           <div className="grid lg:grid-cols-[1fr_380px] gap-12 items-start">
             <div className="glass-panel p-8 rounded-3xl border border-white/10 backdrop-blur-xl bg-white/[0.03]">
               {error && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold flex items-center gap-3"
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold flex items-start gap-3 break-words overflow-hidden"
                 >
-                  <AlertCircle size={16} />
-                  {error}
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="leading-relaxed line-clamp-3 hover:line-clamp-none transition-all cursor-help">
+                      {error}
+                    </p>
+                  </div>
                 </motion.div>
               )}
               <form onSubmit={handleSubmit} className="space-y-8">
@@ -324,6 +384,7 @@ export const ManageEvents: React.FC = () => {
                     <input
                       type="datetime-local"
                       required
+                      min={new Date().toISOString().slice(0, 16)}
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white"
                       value={formData.date}
                       onChange={e => setFormData({ ...formData, date: e.target.value })}
@@ -341,7 +402,7 @@ export const ManageEvents: React.FC = () => {
                     value={formData.category}
                     onChange={e => setFormData({ ...formData, category: e.target.value })}
                   >
-                    <option value="Music & Concerts">Music & Concerts</option>
+                    <option value="Music">Music</option>
                     <option value="Tech & Crypto">Tech & Crypto</option>
                     <option value="Digital Art">Digital Art</option>
                     <option value="Sports & Gaming">Sports & Gaming</option>
@@ -359,9 +420,8 @@ export const ManageEvents: React.FC = () => {
                         min="0"
                         max="20"
                         step="1"
-                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${
-                          (parseInt(formData.royalty) > 20 || parseInt(formData.royalty) < 0) ? 'border-red-500/50' : 'border-white/10 focus:border-[var(--accent-teal)]'
-                        }`}
+                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${(parseInt(formData.royalty) > 20 || parseInt(formData.royalty) < 0) ? 'border-red-500/50' : 'border-white/10 focus:border-[var(--accent-teal)]'
+                          }`}
                         value={formData.royalty}
                         onChange={e => {
                           const val = e.target.value;
@@ -381,13 +441,31 @@ export const ManageEvents: React.FC = () => {
                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic flex items-center gap-2">
                       <Layers size={12} /> 3. Ticket Tiers
                     </h3>
+                    <button
+                      type="button"
+                      onClick={addTier}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-all flex items-center gap-1.5"
+                    >
+                      <Plus size={10} /> Add Tier
+                    </button>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                     {tiers.map((tier, index) => (
-                      <div key={index} className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-3">
+                      <div key={index} className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-3 mb-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-black uppercase tracking-widest text-white/30">General Tier Details</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-white/30">
+                            {index === 0 ? 'General Tier Details' : `Tier #${index + 1} Details`}
+                          </span>
+                          {index > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => removeTier(index)}
+                              className="p-1.5 text-red-500/40 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <input
@@ -424,7 +502,7 @@ export const ManageEvents: React.FC = () => {
 
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Media Upload</h3>
-                  <div 
+                  <div
                     onClick={() => fileInputRef.current?.click()}
                     className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all relative overflow-hidden min-h-[160px]"
                   >
@@ -498,8 +576,8 @@ export const ManageEvents: React.FC = () => {
               <button
                 onClick={() => setManageTab('active')}
                 className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${manageTab === 'active'
-                    ? 'bg-white text-black shadow-2xl'
-                    : 'text-white/40 hover:text-white hover:bg-white/5'
+                  ? 'bg-white text-black shadow-2xl'
+                  : 'text-white/40 hover:text-white hover:bg-white/5'
                   }`}
               >
                 Active Events
@@ -507,8 +585,8 @@ export const ManageEvents: React.FC = () => {
               <button
                 onClick={() => setManageTab('history')}
                 className={`px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${manageTab === 'history'
-                    ? 'bg-white text-black shadow-2xl'
-                    : 'text-white/40 hover:text-white hover:bg-white/5'
+                  ? 'bg-white text-black shadow-2xl'
+                  : 'text-white/40 hover:text-white hover:bg-white/5'
                   }`}
               >
                 Past History

@@ -31,11 +31,14 @@ export function extractCid(url?: string): string | null {
   const pathMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/);
   if (pathMatch) return pathMatch[1];
 
-  // Case 2: protocol format (ipfs://Qm...)
+  // Case 2: protocol format (ipfs://Qm... or ipfs://ba...)
   if (url.startsWith('ipfs://')) return url.replace('ipfs://', '').trim();
 
-  // Case 3: Raw CID (starts with Qm or ba)
-  if (url.startsWith('Qm') || url.startsWith('ba')) return url.trim();
+  // Case 3: Raw CID (starts with Qm, ba, or b)
+  const trimmed = url.trim();
+  if (trimmed.startsWith('Qm') || trimmed.startsWith('ba') || (trimmed.startsWith('b') && trimmed.length > 30)) {
+    return trimmed;
+  }
 
   return null;
 }

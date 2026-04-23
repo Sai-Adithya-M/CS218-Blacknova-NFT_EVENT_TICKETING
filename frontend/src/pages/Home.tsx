@@ -9,7 +9,7 @@ import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { LoginModal } from '../components/ui/LoginModal';
-import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../utils/ipfs';
+import { useIPFSImage } from '../hooks/useIPFSImage';
 
 const CATEGORIES = [
   { name: 'Music', color: 'from-purple-500/20 to-purple-900/10' },
@@ -127,7 +127,7 @@ export const Home: React.FC = () => {
               {/* Badge */}
               <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full border border-white/10 bg-white/5 mb-8 backdrop-blur-md">
                 <span className="w-2 h-2 rounded-full bg-[var(--accent-teal)] animate-ping inline-block" />
-                <span className="text-[10px] font-black tracking-[0.25em] uppercase text-white/60">NIFTING — Web3 Ticketing</span>
+                <span className="text-[10px] font-black tracking-[0.25em] uppercase text-white/60">NEXTING — Web3 Ticketing</span>
               </div>
 
               {/* Headline */}
@@ -319,13 +319,8 @@ export const Home: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeEvents.map((event, i) => {
+              const { src: currentImageSrc, loading } = useIPFSImage(event.imageUrl);
               const date = new Date(event.date);
-              
-              const cid = extractCid(event.imageUrl);
-              const gateways = IPFS_GATEWAYS;
-              const currentImageSrc = cid 
-                ? `${gateways[0]}/${cid}` 
-                : (event.imageUrl || FALLBACK_IMG);
 
               return (
                 <motion.div
@@ -342,24 +337,7 @@ export const Home: React.FC = () => {
                     <img 
                       src={currentImageSrc} 
                       alt={event.title} 
-                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        if (!cid) {
-                          target.src = FALLBACK_IMG;
-                          return;
-                        }
-                        
-                        // Try to find the current gateway index
-                        const currentGw = gateways.find(gw => target.src.startsWith(gw));
-                        const nextIndex = gateways.indexOf(currentGw || '') + 1;
-                        
-                        if (nextIndex < gateways.length) {
-                          target.src = `${gateways[nextIndex]}/${cid}`;
-                        } else {
-                          target.src = FALLBACK_IMG;
-                        }
-                      }}
+                      className={`w-full h-full object-cover transition-all duration-500 ${loading ? 'opacity-40 blur-sm scale-110' : 'opacity-80 group-hover:opacity-100 group-hover:scale-105'}`}
                     />
                     <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] border border-white/10">
                       NFT
@@ -393,7 +371,7 @@ export const Home: React.FC = () => {
       <section className="px-6 py-28 bg-gradient-to-b from-white/[0.01] to-transparent border-t border-white/5">
         <div className="px-12 grid lg:grid-cols-2 gap-20 items-center">
           <div>
-            <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">The Nifting Advantage</p>
+            <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">The Nexting Advantage</p>
             <h2 className="text-5xl font-black uppercase tracking-tighter italic leading-tight mb-12">
               Beyond Just<br />A Digital Ticket.
             </h2>
@@ -580,7 +558,7 @@ export const Home: React.FC = () => {
 
           <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-[10px] font-black uppercase tracking-widest text-white/30 italic">
-              © 2026 NIFTING. ALL RIGHTS RESERVED. ON-CHAIN VERIFIED.
+              © 2026 NEXTING. ALL RIGHTS RESERVED. ON-CHAIN VERIFIED.
             </p>
             <div className="flex gap-6">
               <Twitter size={15} className="text-white/30 hover:text-white cursor-pointer transition-colors" />

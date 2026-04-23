@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import { Calendar, MapPin, Sparkles } from 'lucide-react';
 import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import type { Event } from '../../store/useEventStore';
 import { config } from '../../config';
-import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../../utils/ipfs';
+import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 interface EventCardProps {
   event: Event;
@@ -19,21 +19,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
   const totalSupply = event.tiers?.reduce((sum, t) => sum + t.supply, 0) ?? 0;
   const availability = (totalSold / totalSupply) * 100;
 
-
-  const cid = extractCid(event.imageUrl);
-  const gateways = IPFS_GATEWAYS;
-
-  const [gatewayIndex, setGatewayIndex] = useState(0);
-
-  const currentImageSrc = cid
-    ? `${gateways[gatewayIndex]}/${cid}`
-    : (event.imageUrl || FALLBACK_IMG);
-
-  const handleImageError = useCallback(() => {
-    if (cid && gatewayIndex < gateways.length - 1) {
-      setGatewayIndex(prev => prev + 1);
-    }
-  }, [cid, gatewayIndex, gateways.length]);
+  const { src: currentImageSrc, loading: isImageLoading } = useIPFSImage(event.imageUrl);
 
   // Parallax Tilt Effect
   const x = useMotionValue(0);
@@ -90,11 +76,10 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
         <motion.img 
           src={currentImageSrc} 
           alt={event.title}
-          className="w-full h-full object-cover"
+          className={`w-full h-full object-cover transition-all duration-700 ${isImageLoading ? 'blur-sm scale-105' : 'blur-0 scale-100'}`}
           style={{ transform: "translateZ(0px)" }}
           whileHover={{ scale: 1.1 }}
           transition={{ duration: 0.7 }}
-          onError={handleImageError}
         />
       </div>
 
@@ -129,6 +114,11 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
               <MapPin size={12} className="text-[var(--accent-teal)]" />
               <span>{event.location}</span>
             </div>
+            {event.description && (
+              <p className="line-clamp-2 text-[10px] mt-1 text-white/60 leading-relaxed">
+                {event.description}
+              </p>
+            )}
           </div>
 
           <div className="pt-4 border-t border-white/10">

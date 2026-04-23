@@ -146,7 +146,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center mx-auto mb-4">
                     <Wallet size={26} className="text-white" />
                   </div>
-                  <h2 className="text-2xl font-black uppercase tracking-tight italic mb-2">Connect to Nifting</h2>
+                  <h2 className="text-2xl font-black uppercase tracking-tight italic mb-2">Connect to Nexting</h2>
                   <p className="text-white/50 text-sm font-medium">Choose how you want to sign in</p>
                 </div>
 
