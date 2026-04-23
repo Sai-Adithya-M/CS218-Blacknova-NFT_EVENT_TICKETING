@@ -2,8 +2,9 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, Copy, Hash, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2 } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, Hash, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
+import { EventFinancialsModal } from '../components/dashboard/EventFinancialsModal';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ethers } from 'ethers';
@@ -29,6 +30,7 @@ export const ManageEvents: React.FC = () => {
   const { user } = useAuthStore();
   const [isCreating, setIsCreating] = useState(false);
   const [isMining, setIsMining] = useState(false);
+  const [selectedFinancials, setSelectedFinancials] = useState<Event | null>(null);
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -206,6 +208,17 @@ export const ManageEvents: React.FC = () => {
       }
 
       const signerAddress = await signer.getAddress();
+      
+      // Calculate deployment cost
+      let deploymentCost = "0";
+      let gasUsedStr = "0";
+      if (receipt) {
+        const gasUsed = receipt.gasUsed;
+        const gasPrice = receipt.effectiveGasPrice || tx.gasPrice || 0n;
+        deploymentCost = (gasUsed * gasPrice).toString();
+        gasUsedStr = gasUsed.toString();
+      }
+
       createEvent({
         id: blockchainEventId,
         title: metadataJSON.name,
@@ -216,6 +229,8 @@ export const ManageEvents: React.FC = () => {
         organizerId: signerAddress,
         royaltyBps: royaltyBps,
         status: 'active',
+        deploymentCost,
+        gasUsed: gasUsedStr,
         tiers: metadataJSON.tiers.map((t: any, idx: number) => ({
           id: t.id || `tier_${blockchainEventId}_${idx}`,
           name: t.name,
@@ -259,6 +274,14 @@ export const ManageEvents: React.FC = () => {
       variants={containerVariants}
       className="px-12 pt-32 pb-12"
     >
+      <AnimatePresence>
+        {selectedFinancials && (
+          <EventFinancialsModal
+            event={selectedFinancials}
+            onClose={() => setSelectedFinancials(null)}
+          />
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {isMining && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
@@ -617,41 +640,42 @@ export const ManageEvents: React.FC = () => {
                   .map(event => (
                     <div key={event.id} className="space-y-4">
                       <EventCard event={event} showEtherscan={true} />
-                      <div className="glass-panel p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic">
-                            <ShieldCheck size={14} />
-                            On-Chain Metadata
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="p-3 rounded-xl bg-black/40 border border-white/5">
-                            <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                              <Hash size={8} /> Event ID
-                            </p>
-                            <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
-                          </div>
-                          <div className="p-3 rounded-xl bg-black/40 border border-white/5">
-                            <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                              <ShieldCheck size={8} /> Contract
-                            </p>
-                            <div className="flex items-center justify-between">
-                              <code className="text-[10px] font-mono font-bold text-white/60">
-                                {config.contractAddress.slice(0, 6)}...
-                              </code>
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(config.contractAddress);
-                                  alert("Copied!");
-                                }}
-                                className="p-1 rounded bg-white/5 text-white/30"
-                              >
-                                <Copy size={10} />
-                              </button>
+                      <div className="grid grid-cols-1 gap-4">
+                          <button
+                            onClick={() => setSelectedFinancials(event)}
+                            className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06] hover:border-[var(--accent-teal)]/40 transition-all group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-[var(--accent-teal)]/10 rounded-xl text-[var(--accent-teal)] group-hover:scale-110 transition-transform">
+                                <PieChart size={16} />
+                              </div>
+                              <div className="text-left">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-white">Event Financials</p>
+                                <p className="text-[8px] text-white/30 uppercase tracking-tighter">View Revenue & Profit</p>
+                              </div>
+                            </div>
+                            <ArrowUpRight size={14} className="text-white/20 group-hover:text-[var(--accent-teal)]" />
+                          </button>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="p-3 rounded-xl bg-black/40 border border-white/5">
+                              <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
+                                <Hash size={8} /> Event ID
+                              </p>
+                              <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
+                            </div>
+                            <div className="p-3 rounded-xl bg-black/40 border border-white/5">
+                              <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
+                                <ShieldCheck size={8} /> Contract
+                              </p>
+                              <div className="flex items-center justify-between">
+                                <code className="text-[10px] font-mono font-bold text-white/60">
+                                  {config.contractAddress.slice(0, 6)}...
+                                </code>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
                     </div>
                   ))}
               </div>

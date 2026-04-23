@@ -56,6 +56,8 @@ export interface Event {
   status: 'active' | 'past' | 'cancelled';
   tiers: TicketTier[];
   hasIpfsError?: boolean;
+  deploymentCost?: string; // Total gas cost in Wei
+  gasUsed?: string;       // Units of gas used
 }
 
 interface EventState {
