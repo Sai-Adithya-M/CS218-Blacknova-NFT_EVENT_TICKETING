@@ -10,7 +10,7 @@ import contractABI from './contracts/NFTTicket.json';
 // CONFIGURATION
 // ============================
 // TODO: Replace with your deployed contract address
-const CONTRACT_ADDRESS = '0x6A0d38216cB1bc9cEC83683D8EcBEE4A45684b6c';
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 
 // Supported chain IDs
 const SUPPORTED_CHAINS = {
