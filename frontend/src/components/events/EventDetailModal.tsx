@@ -176,6 +176,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
     if (availableFromTier.length === 0) return;
 
+    const ticketToBuy = availableFromTier[0];
+
     if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
       setErrorMsg('Contract not connected.');
       setStep('error');
@@ -189,14 +191,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      const priceWei = ethers.parseEther(selectedResaleTicket.resalePrice.toString());
+      const priceWei = ethers.parseEther(ticketToBuy.resalePrice.toString());
 
-      const tx = await contract.buyResaleTicket(selectedResaleTicket.tokenId, { value: priceWei });
+      const tx = await contract.buyResaleTicket(ticketToBuy.tokenId, { value: priceWei });
       const receipt = await tx.wait();
 
-      storeBuyResale(selectedResaleTicket.id, user.id, selectedResaleTicket.resalePrice);
+      storeBuyResale(ticketToBuy.id, user.id, ticketToBuy.resalePrice);
 
-      setPurchasedTokenId(selectedResaleTicket.tokenId);
+      setPurchasedTokenId(ticketToBuy.tokenId);
       setPurchasedTxHash(receipt.hash);
       setStep('success');
     } catch (err: any) {
@@ -351,7 +353,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                                   };
                                 }
                                 acc[t.tierName].count++;
-                                acc[t.tierName].minPrice = Math.min(acc[t.tierName].minPrice, t.resalePrice || Infinity);
+                                const price = t.resalePrice || Infinity;
+                                if (price < acc[t.tierName].minPrice) {
+                                  acc[t.tierName].minPrice = price;
+                                  acc[t.tierName].example = t;
+                                }
                                 return acc;
                               }, {} as Record<string, { count: number, minPrice: number, originalPrice: number, example: any }>)
                             ).map(([tierName, data]) => (
