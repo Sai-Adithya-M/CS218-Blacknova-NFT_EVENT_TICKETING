@@ -381,29 +381,13 @@ export const ManageEvents: React.FC = () => {
                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic flex items-center gap-2">
                       <Layers size={12} /> 3. Ticket Tiers
                     </h3>
-                    <button
-                      type="button"
-                      onClick={addTier}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all font-bold"
-                    >
-                      <Plus size={12} /> Add Tier
-                    </button>
                   </div>
 
                   <div className="space-y-3">
                     {tiers.map((tier, index) => (
                       <div key={index} className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-black uppercase tracking-widest text-white/30">Tier {index + 1}</span>
-                          {tiers.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeTier(index)}
-                              className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
+                          <span className="text-[9px] font-black uppercase tracking-widest text-white/30">General Tier Details</span>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <input
