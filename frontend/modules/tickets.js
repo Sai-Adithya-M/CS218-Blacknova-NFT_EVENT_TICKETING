@@ -26,7 +26,7 @@ export async function fetchData() {
         tickets.push({
           tokenId: i,
           eventId: Number(eventId),
-          eventName: evt.name,
+          eventName: evt.ipfsHash || `Event #${Number(eventId)}`,
           isListed: listing.active,
           listingPrice: listing.active ? listing.priceWei : null,
         });

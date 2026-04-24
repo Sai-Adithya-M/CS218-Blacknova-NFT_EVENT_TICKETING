@@ -7,12 +7,17 @@ module.exports = {
   solidity: {
     version: "0.8.28",
     settings: {
-      evmVersion: "cancun", // <-- ADD THIS LINE
+      evmVersion: "cancun",
       optimizer: {
         enabled: true,
         runs: 200,
       },
     },
+  },
+  gasReporter: {
+    enabled: true,
+    currency: "USD",
+    noColors: false,
   },
   networks: {
     sepolia: {

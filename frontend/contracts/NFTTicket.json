@@ -221,11 +221,30 @@
       {
         "indexed": false,
         "internalType": "string",
-        "name": "name",
+        "name": "ipfsHash",
         "type": "string"
       }
     ],
     "name": "EventCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "eventId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "newIpfsHash",
+        "type": "string"
+      }
+    ],
+    "name": "EventUpdated",
     "type": "event"
   },
   {
@@ -318,6 +337,12 @@
         "internalType": "address",
         "name": "buyer",
         "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "tier",
+        "type": "uint8"
       }
     ],
     "name": "TicketMinted",
@@ -420,6 +445,29 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "eventId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8[]",
+        "name": "tiers",
+        "type": "uint8[]"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "quantities",
+        "type": "uint256[]"
+      }
+    ],
+    "name": "buyBatchTickets",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "tokenId",
         "type": "uint256"
       }
@@ -435,6 +483,16 @@
         "internalType": "uint256",
         "name": "eventId",
         "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "quantity",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "tier",
+        "type": "uint8"
       }
     ],
     "name": "buyTicket",
@@ -459,7 +517,7 @@
     "inputs": [
       {
         "internalType": "string",
-        "name": "name",
+        "name": "ipfsHash",
         "type": "string"
       },
       {
@@ -487,17 +545,40 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "eventId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "newIpfsHash",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newMaxTickets",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newPriceWei",
+        "type": "uint256"
+      }
+    ],
+    "name": "editEvent",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "",
         "type": "uint256"
       }
     ],
     "name": "events",
     "outputs": [
-      {
-        "internalType": "string",
-        "name": "name",
-        "type": "string"
-      },
       {
         "internalType": "uint256",
         "name": "maxTickets",
@@ -527,25 +608,11 @@
         "internalType": "bool",
         "name": "exists",
         "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
+      },
       {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      }
-    ],
-    "name": "getApproved",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
+        "internalType": "string",
+        "name": "ipfsHash",
+        "type": "string"
       }
     ],
     "stateMutability": "view",
@@ -559,15 +626,10 @@
         "type": "uint256"
       }
     ],
-    "name": "getEvent",
+    "name": "fetchEventData",
     "outputs": [
       {
         "components": [
-          {
-            "internalType": "string",
-            "name": "name",
-            "type": "string"
-          },
           {
             "internalType": "uint256",
             "name": "maxTickets",
@@ -597,11 +659,35 @@
             "internalType": "bool",
             "name": "exists",
             "type": "bool"
+          },
+          {
+            "internalType": "string",
+            "name": "ipfsHash",
+            "type": "string"
           }
         ],
         "internalType": "struct NFTTicket.Event",
         "name": "",
         "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getApproved",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -936,6 +1022,25 @@
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "tokenToTier",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",

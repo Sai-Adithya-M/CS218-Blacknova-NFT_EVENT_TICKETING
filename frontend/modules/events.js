@@ -43,7 +43,7 @@ export async function fetchData() {
       if (evt.exists) {
         events.push({
           id: i,
-          name: evt.name,
+          name: evt.ipfsHash || `Event #${i}`,
           maxTickets: Number(evt.maxTickets),
           priceWei: evt.priceWei,
           ticketsSold: Number(evt.ticketsSold),
@@ -62,12 +62,13 @@ export async function fetchData() {
 /**
  * Buy a ticket for an event
  */
-export async function buyTicket(eventId, priceWei) {
+export async function buyTicket(eventId, priceWei, quantity = 1, tier = 0) {
   const contract = await getContract();
 
   showLoading('Purchasing ticket...');
   try {
-    const tx = await contract.buyTicket(eventId, { value: priceWei });
+    const totalValue = BigInt(priceWei) * BigInt(quantity);
+    const tx = await contract.buyTicket(eventId, quantity, tier, { value: totalValue });
     showLoading('Waiting for confirmation...');
     await tx.wait();
     showToast('Ticket purchased successfully! 🎉', 'success');
