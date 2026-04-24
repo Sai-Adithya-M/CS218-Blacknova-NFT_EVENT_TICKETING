@@ -1,9 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, TrendingUp, Wallet, Ticket, PieChart, Info, ArrowUpRight, Loader2 } from 'lucide-react';
+import { X, TrendingUp, Wallet, Ticket, PieChart, Info, ArrowUpRight, Loader2, RefreshCw } from 'lucide-react';
 import { ethers } from 'ethers';
 import { useEventStore, type Event } from '../../store/useEventStore';
 import { config } from '../../config';
+import { getReadProvider } from '../../utils/blockchain';
+
+const FINANCIALS_ABI = [
+  "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
+  "function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48)",
+  "function nextTokenId() public view returns (uint256)",
+  "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
+  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)",
+];
+
+interface ChainFinancials {
+  priceGwei: bigint;
+  maxTickets: number;
+  ticketsSold: number;
+  royaltyPct: number;
+  primaryRevenueWei: bigint;
+  totalRevenueWei: bigint;
+  deploymentCostWei: bigint;
+  gasUsed: bigint;
+}
 
 interface EventFinancialsModalProps {
   eventId: string;
@@ -11,37 +31,121 @@ interface EventFinancialsModalProps {
 }
 
 export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ eventId, onClose }) => {
-  const { events, loadEventGasCost } = useEventStore();
+  const { events } = useEventStore();
   const event = events.find(e => e.id === eventId);
-  
-  const [showFiat, setShowFiat] = useState(false);
-  const [isCalculatingGas, setIsCalculatingGas] = useState(false);
-  const ETH_PRICE = 3500; // Mock ETH price
 
-  React.useEffect(() => {
-    if (event && !event.deploymentCost && !isCalculatingGas) {
-      setIsCalculatingGas(true);
-      loadEventGasCost(event.id, event.txHash).finally(() => {
-        setIsCalculatingGas(false);
+  const [showFiat, setShowFiat] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [financials, setFinancials] = useState<ChainFinancials | null>(null);
+  const ETH_PRICE = 3500;
+
+  const numericId = Number(eventId.replace('evt_', ''));
+
+  const fetchFinancials = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const provider = getReadProvider();
+      const contract = new ethers.Contract(config.contractAddress, FINANCIALS_ABI, provider);
+
+      // 1. Fetch live on-chain event struct
+      const evtData = await contract.fetchEventData(numericId);
+      const priceGwei = BigInt(evtData.priceWei ?? evtData[1]);
+      const maxTickets = Number(evtData.maxTickets ?? evtData[2]);
+      const ticketsSold = Number(evtData.ticketsSold ?? evtData[3]);
+      const royaltyPct = Number(evtData.royaltyBps ?? evtData[4]);
+
+      // 2. Find all tokens belonging to this event by scanning tokenToEvent
+      const nextTokenId = Number(await contract.nextTokenId());
+      const eventTokenIds: number[] = [];
+
+      // Batch check which tokens belong to this event
+      const tokenEventChecks = await Promise.all(
+        Array.from({ length: nextTokenId - 1 }, (_, i) =>
+          contract.tokenToEvent(i + 1).then((eid: bigint) => ({ tokenId: i + 1, eventId: Number(eid) })).catch(() => null)
+        )
+      );
+
+      for (const check of tokenEventChecks) {
+        if (check && check.eventId === numericId) {
+          eventTokenIds.push(check.tokenId);
+        }
+      }
+
+      // 3. Fetch purchase prices for event tokens
+      let primaryRevenueWei = 0n;
+      if (eventTokenIds.length > 0) {
+        const prices = await Promise.all(
+          eventTokenIds.map(id => contract.getTokenPurchasePrice(id).catch(() => 0n))
+        );
+        for (const p of prices) {
+          const gweiVal = BigInt(p);
+          // If purchase price is 0 (pre-upgrade tokens), use the event base price
+          const effectiveGwei = gweiVal > 0n ? gweiVal : priceGwei;
+          primaryRevenueWei += effectiveGwei * BigInt(1e9);
+        }
+      }
+
+      // 4. Get deployment cost from EventCreated log (chunked query)
+      let deploymentCostWei = 0n;
+      let gasUsed = 0n;
+      try {
+        const latestBlock = await provider.getBlockNumber();
+        const startBlock = config.deploymentBlock || 5700000;
+        // Search in 10k chunks from latest going backwards
+        let found = false;
+        let hi = latestBlock;
+        while (hi >= startBlock && !found) {
+          const lo = Math.max(startBlock, hi - 9999);
+          try {
+            const logs = await contract.queryFilter(contract.filters.EventCreated(numericId), lo, hi);
+            if (logs.length > 0) {
+              const txHash = (logs[0] as any).transactionHash;
+              if (txHash) {
+                const receipt = await provider.getTransactionReceipt(txHash);
+                if (receipt) {
+                  gasUsed = receipt.gasUsed;
+                  const gasPrice = receipt.gasPrice || 0n;
+                  deploymentCostWei = gasUsed * gasPrice;
+                }
+              }
+              found = true;
+            }
+          } catch {}
+          hi = lo - 1;
+        }
+      } catch {}
+
+      const totalRevenueWei = primaryRevenueWei;
+
+      setFinancials({
+        priceGwei, maxTickets, ticketsSold, royaltyPct,
+        primaryRevenueWei, totalRevenueWei,
+        deploymentCostWei, gasUsed,
       });
+    } catch (err: any) {
+      console.error("Failed to fetch financials:", err);
+      setError(err.message || "Failed to load financial data");
+    } finally {
+      setIsLoading(false);
     }
-  }, [event?.id, event?.txHash, event?.deploymentCost]);
+  };
+
+  useEffect(() => { fetchFinancials(); }, [eventId]);
 
   if (!event) return null;
 
-  // Defensive Calculations
-  const deploymentCostEth = parseFloat(ethers.formatEther(event.deploymentCost || "0"));
-  
   const tiers = Array.isArray(event.tiers) ? event.tiers : [];
-  
-  const tierRevenue = tiers.map(tier => ({
-    ...tier,
-    revenue: (Number(tier.sold) || 0) * (Number(tier.price) || 0)
-  }));
 
-  const totalRevenueEth = tierRevenue.reduce((acc, t) => acc + t.revenue, 0);
-  const totalTicketsSold = tiers.reduce((acc, t) => acc + (Number(t.sold) || 0), 0);
-  const netProfitEth = totalRevenueEth - deploymentCostEth;
+  // Format helpers
+  const formatEthValue = (weiValue: bigint) => {
+    const eth = parseFloat(ethers.formatEther(weiValue));
+    if (showFiat) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(eth * ETH_PRICE);
+    }
+    return `${eth.toFixed(4)} ETH`;
+  };
 
   const formatValue = (ethValue: number) => {
     if (isNaN(ethValue)) return "0.00";
@@ -50,6 +154,25 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
     }
     return `${ethValue.toFixed(4)} ETH`;
   };
+
+  // Derive display values (use chain data when available, store as fallback)
+  const totalRevenueWei: bigint = financials?.totalRevenueWei ?? 0n;
+  const deploymentCostWei: bigint = financials?.deploymentCostWei ?? 0n;
+  const netProfitWei: bigint = totalRevenueWei - deploymentCostWei;
+  const deploymentCostEth = parseFloat(ethers.formatEther(deploymentCostWei));
+  const netProfitEth = parseFloat(ethers.formatEther(netProfitWei));
+  const totalRevenueEth = parseFloat(ethers.formatEther(totalRevenueWei));
+  const ticketsSold = financials?.ticketsSold ?? tiers.reduce((s, t) => s + (t.sold || 0), 0);
+  const totalTickets = financials?.maxTickets ?? tiers.reduce((s, t) => s + t.supply, 0);
+  const currentPriceEth = financials ? parseFloat(ethers.formatUnits(financials.priceGwei, "gwei")) : (tiers[0]?.price ?? 0);
+  const royaltyPct = financials?.royaltyPct ?? event.royaltyBps;
+
+  // Tier revenue from store (fallback when chain data loading)
+  const tierRevenue = tiers.map(tier => ({
+    ...tier,
+    revenue: (Number(tier.sold) || 0) * (Number(tier.price) || 0)
+  }));
+  const storeTotalRevenue = tierRevenue.reduce((acc, t) => acc + t.revenue, 0);
 
   return (
     <motion.div
@@ -79,7 +202,15 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
             </div>
             <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">{event.title} • Revenue Analytics</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => fetchFinancials()}
+              disabled={isLoading}
+              className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95 disabled:opacity-50"
+              title="Refresh from blockchain"
+            >
+              <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+            </button>
             <button
               onClick={() => setShowFiat(!showFiat)}
               className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all active:scale-95"
@@ -93,6 +224,13 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
         </div>
 
         <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+          {error && (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold flex items-center gap-3">
+              <Info size={16} />
+              {error}
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="glass-panel bg-white/[0.03] border border-white/10 p-6 rounded-3xl relative overflow-hidden group">
@@ -100,9 +238,13 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                 <TrendingUp size={48} />
               </div>
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Total Revenue</p>
-              <h3 className="text-3xl font-black text-white italic">{formatValue(totalRevenueEth)}</h3>
+              <h3 className="text-3xl font-black text-white italic">
+                {isLoading ? <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-teal)]" /> :
+                  financials ? formatEthValue(totalRevenueWei) : formatValue(storeTotalRevenue)
+                }
+              </h3>
               <div className="mt-4 flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded-md bg-green-500/10 text-green-400 text-[10px] font-bold">{totalTicketsSold} Sold</span>
+                <span className="px-2 py-0.5 rounded-md bg-green-500/10 text-green-400 text-[10px] font-bold">{ticketsSold} Sold</span>
               </div>
             </div>
 
@@ -112,10 +254,10 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
               </div>
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Deployment Cost</p>
               <h3 className="text-3xl font-black text-white italic">
-                {isCalculatingGas ? <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-teal)]" /> : formatValue(deploymentCostEth)}
+                {isLoading ? <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-teal)]" /> : formatValue(deploymentCostEth)}
               </h3>
               <div className="mt-4 flex items-center gap-2">
-                <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-tighter">Gas: {parseInt(event.gasUsed || "0").toLocaleString()} units</span>
+                <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-tighter">Gas: {Number(financials?.gasUsed ?? 0n).toLocaleString()} units</span>
               </div>
             </div>
 
@@ -125,7 +267,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
               </div>
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Net Profit</p>
               <h3 className={`text-3xl font-black italic ${netProfitEth >= 0 ? 'text-white' : 'text-red-400'}`}>
-                {formatValue(netProfitEth)}
+                {isLoading ? <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-teal)]" /> : formatValue(netProfitEth)}
               </h3>
               <div className="mt-4">
                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
@@ -134,6 +276,26 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
               </div>
             </div>
           </div>
+
+          {/* Live Chain Info */}
+          {financials && (
+            <div className="flex flex-wrap gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/30">Current Price</span>
+                <span className="text-xs font-black text-[var(--accent-teal)]">{currentPriceEth} ETH</span>
+              </div>
+              <div className="w-px h-4 bg-white/10" />
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/30">Supply</span>
+                <span className="text-xs font-black text-white">{ticketsSold} / {totalTickets}</span>
+              </div>
+              <div className="w-px h-4 bg-white/10" />
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/30">Royalty</span>
+                <span className="text-xs font-black text-purple-400">{royaltyPct}%</span>
+              </div>
+            </div>
+          )}
 
           {/* Ticket Tiers Breakdown */}
           <div className="space-y-4">
@@ -164,11 +326,11 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                           <div className="w-20 h-1.5 bg-white/5 rounded-full overflow-hidden">
                             <motion.div
                               initial={{ width: 0 }}
-                              animate={{ width: `${(tier.sold / tier.supply) * 100}%` }}
+                              animate={{ width: `${tier.supply > 0 ? (tier.sold / tier.supply) * 100 : 0}%` }}
                               className="h-full bg-[var(--accent-teal)] shadow-[0_0_10px_rgba(45,212,191,0.5)]"
                             />
                           </div>
-                          <span className="text-[9px] font-black text-zinc-600">{Math.round((tier.sold / tier.supply) * 100)}%</span>
+                          <span className="text-[9px] font-black text-zinc-600">{tier.supply > 0 ? Math.round((tier.sold / tier.supply) * 100) : 0}%</span>
                         </div>
                       </td>
                     </tr>
@@ -193,11 +355,11 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
               </div>
               <div className="flex justify-between items-end">
                 <div>
-                  <p className="text-4xl font-black text-white italic">{(event.royaltyBps / 100).toFixed(1)}%</p>
+                  <p className="text-4xl font-black text-white italic">{royaltyPct}%</p>
                   <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-widest mt-2">Continuous Revenue</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs font-black text-purple-400 italic">{event.royaltyBps} BPS</p>
+                  <p className="text-xs font-black text-purple-400 italic">{royaltyPct} BPS</p>
                 </div>
               </div>
               <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-[9px] font-medium text-zinc-500 leading-relaxed uppercase tracking-tighter">
