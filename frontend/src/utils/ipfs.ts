@@ -6,18 +6,15 @@
 const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
 
 /**
- * Ordered list of public IPFS gateways.
- * We include multiple gateways to ensure high availability and speed.
+ * CORS-verified public IPFS gateways (all return Access-Control-Allow-Origin: *).
+ * Ordered by reliability / speed.
  */
 export const IPFS_GATEWAYS = [
-  'https://gateway.pinata.cloud/ipfs',
-  'https://ipfs.io/ipfs',
-  'https://nftstorage.link/ipfs',
-  'https://cloudflare-ipfs.com/ipfs',
-  'https://dweb.link/ipfs',
-  'https://cf-ipfs.com/ipfs',
-  'https://storry.tv/ipfs',
-  'https://gateway.ipfs.io/ipfs',
+  'https://gateway.pinata.cloud/ipfs',   // Pinata — CORS ✅, fastest for pinned content
+  'https://ipfs.io/ipfs',                // Protocol Labs — CORS ✅
+  'https://nftstorage.link/ipfs',        // NFT.Storage — CORS ✅
+  'https://cloudflare-ipfs.com/ipfs',    // Cloudflare — CORS ✅
+  'https://dweb.link/ipfs',              // Protocol Labs dweb — CORS ✅
 ];
 
 export const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
@@ -59,35 +56,44 @@ export async function fetchFromIPFS(
 
   const attemptGateway = async (baseUrl: string) => {
     const url = `${baseUrl}/${cid}`;
+    // Build headers — add Pinata JWT if hitting Pinata's gateway
+    const headers: HeadersInit = {};
+    if (baseUrl.includes('pinata.cloud') && PINATA_JWT) {
+      headers['Authorization'] = `Bearer ${PINATA_JWT}`;
+    }
     try {
+      const method = returnUrl ? 'HEAD' : 'GET';
       const response = await fetch(url, { 
         signal: controller.signal,
-        method: returnUrl ? 'HEAD' : 'GET' 
+        method,
+        mode: 'cors',   // Explicit CORS mode — drops non-CORS responses cleanly
+        headers,
       });
-      if (!response.ok) throw new Error('Gateway failed');
+      if (!response.ok) throw new Error(`Gateway ${baseUrl} returned ${response.status}`);
       
       if (returnUrl) return url;
-      
       const data = json ? await response.json() : response;
       return data;
     } catch (e) {
       if (returnUrl) {
-         // Some gateways don't support HEAD, fallback to GET for probing
-         try {
-           const retryRes = await fetch(url, { signal: controller.signal });
-           if (retryRes.ok) return url;
-         } catch(err) {}
+        // Some gateways block HEAD; fall back to GET for probing
+        try {
+          const retryRes = await fetch(url, { signal: controller.signal, mode: 'cors', headers });
+          if (retryRes.ok) return url;
+        } catch { }
       }
       throw e;
     }
   };
 
 
-  // Staggered Tiers: Try fast ones immediately, then expand if they take too long
+  // Tier 0: Pinata + ipfs.io — tried immediately (fastest, CORS guaranteed)
+  // Tier 1: nftstorage + cloudflare — staggered 600ms
+  // Tier 2: dweb.link — staggered 2.5s fallback
   const tiers = [
-    IPFS_GATEWAYS.slice(0, 3), // Aggressive first tier
-    IPFS_GATEWAYS.slice(3, 6),
-    IPFS_GATEWAYS.slice(6),
+    IPFS_GATEWAYS.slice(0, 2),
+    IPFS_GATEWAYS.slice(2, 4),
+    IPFS_GATEWAYS.slice(4),
   ];
 
   try {

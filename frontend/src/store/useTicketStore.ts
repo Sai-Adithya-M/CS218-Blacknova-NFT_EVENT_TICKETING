@@ -6,16 +6,18 @@ import { fetchFromIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
-  "function tokenToEvent(uint256 tokenId) public view returns (uint)",
+  "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
-  "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
-  "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
+  // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
+  "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
+  "function getResaleListing(uint256 tokenId) public view returns (tuple(address seller, uint48 priceWei, bool active))",
   "function nextTokenId() public view returns (uint256)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
-  "event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei)",
-  "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)",
-  "event ListingCancelled(uint256 indexed tokenId)"
+  "event TicketListed(uint256 indexed tokenId, address indexed seller, uint48 priceWei)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei)",
+  "event ListingCancelled(uint256 indexed tokenId)",
+  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
 // Fallback map if metadata is unreachable
@@ -112,13 +114,15 @@ export const useTicketStore = create<TicketState>((set) => ({
         mintedLogs,
         listedLogs,
         resoldLogs,
-        cancelledLogs
+        cancelledLogs,
+        createdLogs   // for ipfsHash lookup
       ] = await Promise.all([
         contract.queryFilter(contract.filters.Transfer(), fromBlock).catch(() => contract.queryFilter(contract.filters.Transfer(), -10000).catch(() => [])),
         contract.queryFilter(contract.filters.TicketMinted(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketMinted(), -10000).catch(() => [])),
         contract.queryFilter(contract.filters.TicketListed(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketListed(), -10000).catch(() => [])),
         contract.queryFilter(contract.filters.TicketResold(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketResold(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.ListingCancelled(), fromBlock).catch(() => contract.queryFilter(contract.filters.ListingCancelled(), -10000).catch(() => []))
+        contract.queryFilter(contract.filters.ListingCancelled(), fromBlock).catch(() => contract.queryFilter(contract.filters.ListingCancelled(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.EventCreated(), fromBlock).catch(() => contract.queryFilter(contract.filters.EventCreated(), -10000).catch(() => []))
       ]);
 
       const owners: Record<string, string> = {};
@@ -158,6 +162,14 @@ export const useTicketStore = create<TicketState>((set) => ({
         }
       });
 
+      // ipfsHash lives only in EventCreated logs, not in the struct
+      const ipfsHashByEvent: Record<string, string> = {};
+      (createdLogs as any[]).forEach((log: any) => {
+        if (log.args?.ipfsHash) {
+          ipfsHashByEvent[log.args.eventId.toString()] = log.args.ipfsHash;
+        }
+      });
+
       const relevantTokens: string[] = [];
       const userLower = userAddress?.toLowerCase() || "";
       
@@ -176,7 +188,7 @@ export const useTicketStore = create<TicketState>((set) => ({
         if (!eventIdNum) return;
         try {
           const evtData = await contract.fetchEventData(eventIdNum);
-          const hash = evtData.ipfsHash || evtData[6];
+          const hash = ipfsHashByEvent[eventIdNum]; // from EventCreated log
           eventDataCache[eventIdNum] = {
             data: evtData,
             metadata: hash ? await fetchFromIPFS(hash).catch(() => null) : null
@@ -194,7 +206,8 @@ export const useTicketStore = create<TicketState>((set) => ({
         const tierIndex = tokenTiers[tId] || 0;
         
         let tierName = TIER_MAP[tierIndex] || 'General';
-        let basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
+        // priceWei stored as gwei in the contract (uint40); convert to ETH for UI
+        let basePrice = parseFloat(ethers.formatUnits(evt.priceWei || evt[1], "gwei"));
 
         if (metadata?.tiers?.[tierIndex]) {
           tierName = metadata.tiers[tierIndex].name;
@@ -205,7 +218,8 @@ export const useTicketStore = create<TicketState>((set) => ({
 
         const isActiveListing = listings[tId]?.active;
         const resalePriceWei = listings[tId]?.priceWei;
-        const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatEther(resalePriceWei)) : undefined;
+        // TicketListed emits priceWei in gwei (uint48); convert to ETH for UI
+        const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatUnits(resalePriceWei, "gwei")) : undefined;
 
         loadedTickets.push({
           id: `tkt_${tId}`,

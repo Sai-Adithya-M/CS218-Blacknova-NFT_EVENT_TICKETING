@@ -13,11 +13,11 @@ import { ethers } from 'ethers';
 import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
-  "function buyTicket(uint256 eventId, uint256 quantity, uint8 tier) public payable",
-  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint256[] memory quantities) public payable",
+  "function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) public payable",
+  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
-  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)",
-  "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei)"
+  "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei)"
 ];
 
 
@@ -146,6 +146,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
+      // resalePrice is in ETH (already converted from gwei when read from chain)
       const priceWei = ethers.parseEther(selectedResaleTicket.resalePrice.toString());
       const tx = await contract.buyResaleTicket(selectedResaleTicket.tokenId, { value: priceWei });
       const receipt = await tx.wait();
