@@ -46,6 +46,26 @@ async function fetchMetaCached(ipfsHash: string): Promise<any> {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ─── Tier Price Overrides (localStorage) ──────────────────────────────────────
+// Per-tier prices are NOT stored on-chain (only a single lowest price is).
+// When the organiser edits tier prices, we persist them here so they survive refresh.
+const TIER_PRICE_PREFIX = 'tier_prices_v1_';
+
+function getTierPriceOverrides(eventId: string): Record<number, number> | null {
+  try {
+    const raw = localStorage.getItem(TIER_PRICE_PREFIX + eventId);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function setTierPriceOverrides(eventId: string, prices: Record<number, number>) {
+  try {
+    localStorage.setItem(TIER_PRICE_PREFIX + eventId, JSON.stringify(prices));
+  } catch { /* quota exceeded — ignore */ }
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 export interface TicketTier {
   id: string;
   name: string;
@@ -71,6 +91,7 @@ export interface Event {
   gasUsed?: string;
   txHash?: string;
   _tierSales?: Record<number, number>;
+  _tierMaxSupplies?: Record<number, number>; // on-chain per-tier max (from getTierData)
   _ipfsHash?: string; // kept for retryMetadata fallback
 }
 
@@ -86,19 +107,30 @@ interface EventState {
 }
 
 // Helper: merge IPFS metadata into an Event object
-// _tierSales now comes from on-chain getTierData(), not logs
+// On-chain tier data (_tierSales + _tierMaxSupplies) takes priority over IPFS
+// for supply/sold counts. Tier price overrides from localStorage take priority
+// over IPFS prices (since IPFS is immutable and can't reflect edits).
 function applyMetadata(e: Event, metadata: any): Event {
   if (!metadata) return { ...e, hasIpfsError: true };
   const tierSales = e._tierSales || {};
+  const tierMaxSupplies = e._tierMaxSupplies || {};
+  const priceOverrides = getTierPriceOverrides(e.id);
   const tiers = (metadata.tiers && Array.isArray(metadata.tiers) && metadata.tiers.length > 0)
-    ? metadata.tiers.map((t: any, tidx: number) => ({
-        id: t.id || `${e.id}_tier_${tidx}`,
-        name: t.name || 'Tier',
-        price: t.price ?? e.tiers[0]?.price,
-        supply: t.supply ?? e.tiers[0]?.supply,
-        // Use on-chain per-tier sold count (fetched via getTierData)
-        sold: tierSales[tidx] ?? 0
-      }))
+    ? metadata.tiers.map((t: any, tidx: number) => {
+        // On-chain supply (from getTierData max) takes priority over IPFS
+        const onChainMax = tierMaxSupplies[tidx];
+        const supply = (onChainMax !== undefined && onChainMax > 0) ? onChainMax : (t.supply ?? e.tiers[0]?.supply);
+        // localStorage price override > IPFS price > skeleton fallback
+        const price = priceOverrides?.[tidx] ?? t.price ?? e.tiers[0]?.price;
+        return {
+          id: t.id || `${e.id}_tier_${tidx}`,
+          name: t.name || 'Tier',
+          price,
+          supply,
+          // Use on-chain per-tier sold count (fetched via getTierData)
+          sold: tierSales[tidx] ?? 0
+        };
+      })
     : e.tiers;
   return {
     ...e,
@@ -121,9 +153,17 @@ export const useEventStore = create<EventState>((set, get) => ({
     events: [event, ...state.events]
   })),
 
-  editEventLocally: (eventId, updatedData) => set((state) => ({
-    events: state.events.map(e => e.id === eventId ? { ...e, ...updatedData } : e)
-  })),
+  editEventLocally: (eventId, updatedData) => {
+    // Persist tier price overrides to localStorage so they survive refresh
+    if (updatedData.tiers && updatedData.tiers.length > 0) {
+      const priceMap: Record<number, number> = {};
+      updatedData.tiers.forEach((t, i) => { priceMap[i] = t.price; });
+      setTierPriceOverrides(eventId, priceMap);
+    }
+    set((state) => ({
+      events: state.events.map(e => e.id === eventId ? { ...e, ...updatedData } : e)
+    }));
+  },
 
   incrementTierSold: (eventId, tierId) => set((state) => ({
     events: state.events.map(e => e.id === eventId ? {
@@ -269,10 +309,12 @@ export const useEventStore = create<EventState>((set, get) => ({
 
         const onChainTotalSold = Number(evt.ticketsSold ?? evt[3]);
         const tierData = allTierData[idx] || {};
-        // Build _tierSales from on-chain data (sold per tier index)
+        // Build _tierSales and _tierMaxSupplies from on-chain data
         const tierSales: Record<number, number> = {};
+        const tierMaxSupplies: Record<number, number> = {};
         for (const [tierIdx, data] of Object.entries(tierData)) {
           tierSales[Number(tierIdx)] = data.sold;
+          tierMaxSupplies[Number(tierIdx)] = data.max;
         }
 
         return {
@@ -295,6 +337,7 @@ export const useEventStore = create<EventState>((set, get) => ({
           }],
           txHash: eventTxHashes[eventId],
           _tierSales: tierSales,
+          _tierMaxSupplies: tierMaxSupplies,
           _ipfsHash: eventIpfsHashes[eventId],
         } satisfies Event;
       }).filter((e): e is Event => e !== null);

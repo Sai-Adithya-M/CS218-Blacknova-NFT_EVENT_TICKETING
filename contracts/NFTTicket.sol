@@ -21,6 +21,14 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         uint8  royaltyBps;
     }
 
+    // ── TokenData: packed into 1 storage slot (was 3 separate mappings) ──
+    // uint64(8) + uint8(1) + uint48(6) = 15 bytes → fits in 1 slot
+    struct TokenData {
+        uint64 eventId;
+        uint8  tier;
+        uint48 purchasePrice; // gwei
+    }
+
     struct ResaleListing {
         address seller;
         uint48 priceWei;
@@ -28,10 +36,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     }
 
     mapping(uint256 => Event) public events;
-    mapping(uint256 => uint256) public tokenToEvent;
-    mapping(uint256 => uint8) public tokenToTier; // Optimized from string to uint8
+    mapping(uint256 => TokenData) internal _tokenData; // packed: 1 SSTORE instead of 3
     mapping(uint256 => ResaleListing) public resaleListings;
-    mapping(uint256 => uint48) public tokenPurchasePrice; // gwei, tracks actual price paid
 
     // ── Per-tier tracking (uint24 matches maxTickets/ticketsSold size) ───
     mapping(uint256 => mapping(uint8 => uint24)) public tierTicketsSold;
@@ -70,7 +76,6 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             royaltyBps:  royaltyBps
         });
 
-        // Store per-tier supply limits
         for (uint256 i = 0; i < tierIds.length; ) {
             tierMaxTickets[eventId][tierIds[i]] = tierSupplies[i];
             unchecked { i++; }
@@ -97,7 +102,6 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         evt.maxTickets = newMaxTickets;
         evt.priceWei = newPriceWei;
 
-        // Update per-tier supply limits (each must be >= its sold count)
         for (uint256 i = 0; i < tierIds.length; ) {
             require(
                 tierSupplies[i] >= tierTicketsSold[eventId][tierIds[i]],
@@ -117,30 +121,24 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         require(evt.ticketsSold + quantity <= evt.maxTickets, "Not enough tickets available");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
 
-        // Per-tier supply check (only if tier limit was set, i.e. > 0)
         uint24 tierMax = tierMaxTickets[eventId][tier];
         if (tierMax > 0) {
-            require(
-                tierTicketsSold[eventId][tier] + quantity <= tierMax,
-                "Tier sold out"
-            );
+            require(tierTicketsSold[eventId][tier] + quantity <= tierMax, "Tier sold out");
         }
 
-        // priceWei is stored in gwei; multiply by 1e9 to get wei
         require(msg.value >= uint256(evt.priceWei) * 1e9 * quantity, "Incorrect ETH amount");
 
-        // Actual per-ticket price in gwei (from msg.value, not base price)
+        // Actual per-ticket price in gwei
         uint48 actualPriceGwei = uint48(msg.value / (uint256(quantity) * 1e9));
+        uint64 eid = uint64(eventId);
 
         for (uint256 i = 0; i < quantity; ) {
             uint256 tokenId = nextTokenId;
-            _safeMint(msg.sender, tokenId);
-            tokenToEvent[tokenId] = eventId;
-            tokenToTier[tokenId] = tier;
-            tokenPurchasePrice[tokenId] = actualPriceGwei;
-            
+            _mint(msg.sender, tokenId); // _mint not _safeMint — saves ~2.5K gas/token
+            _tokenData[tokenId] = TokenData(eid, tier, actualPriceGwei); // 1 SSTORE instead of 3
+
             emit TicketMinted(tokenId, eventId, msg.sender, tier);
-            
+
             unchecked { 
                 nextTokenId++;
                 i++; 
@@ -169,20 +167,18 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
         require(totalQuantity > 0, "Quantity must be > 0");
         require(evt.ticketsSold + totalQuantity <= evt.maxTickets, "Not enough tickets available");
-        // priceWei is stored in gwei; multiply by 1e9 to get wei
         require(msg.value >= uint256(evt.priceWei) * 1e9 * totalQuantity, "Incorrect ETH amount");
 
-        // Per-tier supply checks first (fail-fast before minting)
+        // Fail-fast tier checks
         for (uint256 i = 0; i < tiers.length; ) {
             uint24 tierMax = tierMaxTickets[eventId][tiers[i]];
             if (tierMax > 0) {
-                require(
-                    tierTicketsSold[eventId][tiers[i]] + quantities[i] <= tierMax,
-                    "Tier sold out"
-                );
+                require(tierTicketsSold[eventId][tiers[i]] + quantities[i] <= tierMax, "Tier sold out");
             }
             unchecked { i++; }
         }
+
+        uint64 eid = uint64(eventId);
 
         for (uint256 t = 0; t < tiers.length; ) {
             uint24 qty = quantities[t];
@@ -191,13 +187,11 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             
             for (uint256 i = 0; i < qty; ) {
                 uint256 tokenId = nextTokenId;
-                _safeMint(msg.sender, tokenId);
-                tokenToEvent[tokenId] = eventId;
-                tokenToTier[tokenId] = tier;
-                tokenPurchasePrice[tokenId] = tierPrice;
-                
+                _mint(msg.sender, tokenId);
+                _tokenData[tokenId] = TokenData(eid, tier, tierPrice);
+
                 emit TicketMinted(tokenId, eventId, msg.sender, tier);
-                
+
                 unchecked { 
                     nextTokenId++;
                     i++; 
@@ -232,12 +226,11 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         ResaleListing memory listing = resaleListings[tokenId];
         require(listing.active, "Not for sale");
         
-        uint256 eventId = tokenToEvent[tokenId];
+        uint256 eventId = uint256(_tokenData[tokenId].eventId);
         Event storage evtResale = events[eventId];
         require(evtResale.organiser != address(0), "Event does not exist");
         require(msg.sender != evtResale.organiser, "Organiser cannot buy their own tickets");
 
-        // listingPrice is stored in gwei; multiply by 1e9 to compare against msg.value (wei)
         require(msg.value == uint256(listing.priceWei) * 1e9, "Incorrect ETH amount");
         require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
 
@@ -255,7 +248,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         require(successSeller, "Seller transfer failed");
 
         _transfer(listing.seller, msg.sender, tokenId);
-        tokenPurchasePrice[tokenId] = listing.priceWei;
+        _tokenData[tokenId].purchasePrice = listing.priceWei; // warm slot — cheap
 
         emit TicketResold(tokenId, listing.seller, msg.sender, listing.priceWei);
     }
@@ -270,7 +263,19 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit ListingCancelled(tokenId);
     }
 
-    // --- View & Standards ---
+    // --- View & Standards (backward-compatible getters) ---
+    function tokenToEvent(uint256 tokenId) public view returns (uint256) {
+        return uint256(_tokenData[tokenId].eventId);
+    }
+
+    function tokenToTier(uint256 tokenId) public view returns (uint8) {
+        return _tokenData[tokenId].tier;
+    }
+
+    function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48) {
+        return _tokenData[tokenId].purchasePrice;
+    }
+
     function fetchEventData(uint256 eventId) public view returns (Event memory) {
         return events[eventId];
     }
@@ -279,16 +284,12 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         return resaleListings[tokenId];
     }
 
-    function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48) {
-        return tokenPurchasePrice[tokenId];
-    }
-
     function getTierData(uint256 eventId, uint8 tier) public view returns (uint24 sold, uint24 max) {
         return (tierTicketsSold[eventId][tier], tierMaxTickets[eventId][tier]);
     }
 
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
-        uint256 eventId = tokenToEvent[tokenId];
+        uint256 eventId = uint256(_tokenData[tokenId].eventId);
         Event memory evt = events[eventId];
         uint256 amount = (salePrice * uint256(evt.royaltyBps)) / 100;
         return (evt.organiser, amount);
