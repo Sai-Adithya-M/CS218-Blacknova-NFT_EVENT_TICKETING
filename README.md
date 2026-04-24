@@ -1,72 +1,149 @@
-# NETIX — NFT Event Ticketing 🎫
+# NETIX — Decentralized NFT Ticketing Revolution 🎫
 
-Welcome to **NETIX**, a decentralized application (dApp) built for seamless and secure NFT-based event ticketing via the Ethereum ecosystem. With this platform, organizers can create events, and users can purchase entry tickets as NFTs. Additionally, users can resell these tickets on a built-in marketplace, with automated royalties routed instantly to the respective organizers.
+![Banner](https://img.shields.io/badge/NETIX-Web3--Ticketing-646CFF?style=for-the-badge&logo=ethereum&logoColor=white)
 
----
-
-## 🛠 Prerequisites
-Before running the project locally, ensure you have the following installed:
-1. **Node.js** (v18 or higher recommended)
-2. **MetaMask** Browser Extension connected to the **Sepolia Test Network**
-3. **Test ETH** on the Sepolia Network. You can get free Sepolia ETH at [Sepolia Faucet](https://sepoliafaucet.com/) or [Google Web3 Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia).
+**NETIX** is a next-generation decentralized application (dApp) designed to transform the event ticketing industry. By utilizing Non-Fungible Tokens (NFTs) on the Ethereum blockchain, NETIX eliminates ticket fraud, ensures verifiable ownership, and establishes a fair secondary market with automated royalty enforcement.
 
 ---
 
-## 🚀 Getting Started
+##  Project Team: Blacknova
+| Name | Roll Number | Role |
+| :--- | :--- | :--- |
+| **Kadasani Aswartha Karthik Reddy** | 240001036 | 
+| **Mannepalli Sai Adithya** | 240001044 | 
+| **Yelisetti Vignesh** | 240001083 | 
+| **Katasani Vishnu Vardhan Reddy** | 240001040 | 
+| **Boddu Kunal** | 240003020 | 
+| **Kesavarapu Deepak Reddy** | 240041022 | 
 
-The project is split into two parts: the Hardhat Smart Contract environment and the Vite/Vanilla JS frontend user interface.
+---
 
-### Step 1: Install Smart Contract Dependencies
-Open a terminal in the root project directory (`nft-ticketing`):
-```bash
-# Install hardhat and related dependencies
-npm install
+##  System Architecture
 
-# Compile the smart contract
-npx hardhat compile
+NETIX follows a decentralized architecture where the frontend interacts directly with the blockchain (Sepolia Testnet) and distributed storage (IPFS).
+
+```mermaid
+graph TD
+    User((User/Organizer)) -->|Connects Wallet| MM[MetaMask]
+    User -->|Interacts| FE[React/Vite Frontend]
+    FE -->|Reads/Writes| SC[NFTTicket.sol Contract]
+    FE -->|Stores Assets| IPFS[IPFS/Pinata]
+    SC -->|Minting/Trades| BC[Ethereum Sepolia]
+    SC -->|Royalties| ORG[Organizer Wallet]
 ```
 
-### Step 2: Running the Frontend User Interface
-The frontend is built using Vite and `ethers.js` logic and exists independently in the `frontend` folder.
+---
 
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-2. Install frontend dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the Vite local development server:
-   ```bash
-   npm run dev
-   ```
+##  Feature Deep-Dive
 
-### Step 3: Open the Platform
-1. Look at your terminal output when you run `npm run dev` (it will typically be `http://localhost:3000` or `http://localhost:3001`).
-2. Open that URL in your browser (e.g., Google Chrome where MetaMask is installed).
-3. The platform will load securely over localhost.
+### 1. Organizer Management Suite
+*   **Decentralized Event Deployment**: Organizers deploy immutable event contracts directly from their dashboard.
+*   **IPFS-Backed Metadata**: All event banners and descriptions are stored on IPFS, ensuring the data remains permanent and tamper-proof.
+*   **Financial Analytics**: A premium dashboard tracking total revenue, tickets sold across tiers, and real-time network latency (ping).
+*   **Tiered Ticketing Engine**: Supports **Silver, Gold, and VIP** tiers, each with its own supply and price points defined at creation.
+
+### 2. Ticketing & Minting Engine
+*   **Primary Sales**: Direct-to-fan minting avoids middleman markups.
+*   **Batch Purchase Logic**: Optimized smart contract functions allow users to buy multiple tickets across different tiers in a single transaction, saving on cumulative gas fees.
+*   **Dynamic Metadata**: Each ticket's tier and event ID are encoded on-chain, verifiable by any block explorer.
+
+### 3. Secondary Marketplace (P2P)
+*   **Secure Resale**: Owners can list their tickets for resale by specifying a price in ETH.
+*   **Escrow-less Trading**: The contract handles the transfer of ownership and funds atomically, preventing "double-spend" or payment fraud.
+*   **EIP-2981 Standard**: Automated royalty distribution. On every resale, a percentage (defined by the organizer) is instantly routed to the organizer's wallet.
 
 ---
 
-## 🦊 How to Interact with the Website
+##  Tech Stack Highlights
 
-1. **Connect Wallet:** Click the "Connect Wallet" button located on the top right.
-2. **Switch Network:** MetaMask will prompt you to approve the connection. The application will automatically detect your network and attempt to switch your MetaMask connection to the **Sepolia Test Network** if you are on the Ethereum Mainnet or elsewhere.
-3. **Create an Event:** On the "Events" tab, fill out the form specifying the event name, max ticket capacity, price (in ETH), and desired royalty percentage. Submitting this sends a transaction to the network.
-4. **Purchase and View:** Tickets can be bought securely down below in the available event cards, and users can manage their purchased tickets within the "My Tickets" tab.
-5. **Marketplace:** You can list owned tickets for resale, allowing other users in the "Marketplace" tab to buy them, automatically handling your set royalties per purchase!
-
-> **Note:** Whenever you make a transaction (like creating an event or purchasing a ticket), MetaMask will open and prompt you to confirm the GAS fees (in Sepolia ETH) necessary to commit that operation onto the blockchain. Always wait for the "success" toast notification to know it has finalized.
+- **Frontend**: **React 18** with **Vite** for ultra-fast HMR and build times.
+- **Styling**: **Tailwind CSS** with a custom "Glassmorphism" design system.
+- **Animations**: **Framer Motion** for smooth page transitions and micro-interactions.
+- **State Management**: **Zustand** for lightweight, high-performance global state (Handling wallet and event data).
+- **Blockchain Interaction**: **Ethers.js v6** for secure communication with the Ethereum network.
+- **Smart Contracts**: **Solidity 0.8.20**, utilizing **OpenZeppelin** libraries for ERC-721 and Access Control.
 
 ---
 
-## 📝 Smart Contract Deployment (Optional)
+##  Prerequisites & Setup
 
-We currently deploy to Sepolia. If you'd like to deploy your version of the smart contract independently using your private key:
-1. Ensure your `.env` contains your `RPC_URL` (Alchemy/Infura Sepolia endpoint) and `PRIVATE_KEY` (from MetaMask).
-2. From the root directory, run:
-   ```bash
-   npx hardhat run scripts/deploy.js --network sepolia
-   ```
-3. Copy your specific deployed address. Navigate to `frontend/main.js` and paste it inside the `CONTRACT_ADDRESS` constant to sync it with your frontend.
+### Requirements
+- **Node.js**: `v18.x` or higher
+- **Package Manager**: `npm v9.x` or `yarn`
+- **Wallet**: **MetaMask** installed in your browser.
+- **Network**: **Ethereum Sepolia Testnet** (Add via [Chainlist](https://chainlist.org/chain/11155111)).
+- **Funds**: Sepolia ETH (Available at [Alchemy Faucet](https://sepoliafaucet.com/)).
+
+### Installation Steps
+
+1.  **Clone & Install Root Dependencies**
+    ```bash
+    git clone [your-repo-url]
+    cd CS218-Blacknova-NFT_EVENT_TICKETING
+    npm install
+    ```
+
+2.  **Smart Contract Compilation**
+    ```bash
+    npx hardhat compile
+    ```
+
+3.  **Frontend Setup**
+    ```bash
+    cd frontend
+    npm install
+    ```
+
+4.  **Environment Setup**
+    Create a `.env` in `frontend/` and add:
+    ```env
+    VITE_CONTRACT_ADDRESS=0x... # Your deployed NFTTicket address
+    VITE_PINATA_API_KEY=your_key
+    VITE_PINATA_SECRET_KEY=your_secret
+    ```
+
+---
+
+## Smart Contract Specification (`NFTTicket.sol`)
+
+| Function | Description |
+| :--- | :--- |
+| `createEvent(...)` | Initializes event metadata, tiers, and royalty rates. |
+| `buyTicket(...)` | Mints a specific tier ticket for a user. |
+| `buyBatchTickets(...)` | Optimized multi-tier, multi-quantity purchase. |
+| `listForResale(...)` | Creates an active listing in the secondary marketplace. |
+| `buyResaleTicket(...)` | Atomic transfer of NFT to buyer and ETH to seller + organizer. |
+| `royaltyInfo(...)` | Returns royalty recipient and amount based on sale price (EIP-2981). |
+
+---
+
+##  Future Requirements & Roadmap
+
+### Phase 1: Verification (Short-term)
+- [ ] **Offline QR Verification**: A mobile-friendly scanner for event entry that verifies ticket ownership via a signed message.
+- [ ] **Push Notifications**: Real-time alerts for successful purchases or resale bids via Push Protocol.
+
+### Phase 2: Financial Expansion (Mid-term)
+- [ ] **Dynamic Pricing (Dutch Auctions)**: Allow organizers to start tickets at a high price that decreases over time to find the perfect market fit.
+- [ ] **Fiat On-ramps**: Integration with Stripe or MoonPay to allow fans to buy NFT tickets using credit cards.
+
+### Phase 3: Ecosystem (Long-term)
+- [ ] **Governance (DAO)**: Implement a platform token for holders to vote on feature updates and platform fees.
+- [ ] **Cross-Chain Support**: Bridge tickets to Layer 2s like Arbitrum or Polygon to reduce gas costs for attendees.
+
+---
+
+##  Troubleshooting
+
+- **Transaction Reverted**: Ensure you have enough Sepolia ETH for gas. Check if the event ticket supply has reached its limit.
+- **Wallet Not Connecting**: Ensure your MetaMask is set to the **Sepolia Test Network**.
+- **Images Not Loading**: IPFS gateways can sometimes be slow; ensure your Pinata keys are correctly configured in the `.env`.
+
+---
+
+## License
+Distributed under the **MIT License**. See `LICENSE` for more information.
+
+---
+
+Developed  by **Team Blacknova** for the Future of Ticketing.
