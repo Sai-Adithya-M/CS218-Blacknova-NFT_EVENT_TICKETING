@@ -30,6 +30,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint256 => uint256) public tokenToEvent;
     mapping(uint256 => uint8) public tokenToTier; // Optimized from string to uint8
     mapping(uint256 => ResaleListing) public resaleListings;
+    mapping(uint256 => uint48) public tokenPurchasePrice; // gwei, tracks actual price paid
 
     event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash);
     event EventUpdated(uint256 indexed eventId, uint24 newMaxTickets, uint40 newPriceWei);
@@ -85,6 +86,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
             _safeMint(msg.sender, tokenId);
             tokenToEvent[tokenId] = eventId;
             tokenToTier[tokenId] = tier;
+            tokenPurchasePrice[tokenId] = evt.priceWei;
             
             emit TicketMinted(tokenId, eventId, msg.sender, tier);
             
@@ -126,6 +128,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
                 _safeMint(msg.sender, tokenId);
                 tokenToEvent[tokenId] = eventId;
                 tokenToTier[tokenId] = tier;
+                tokenPurchasePrice[tokenId] = evt.priceWei;
                 
                 emit TicketMinted(tokenId, eventId, msg.sender, tier);
                 
@@ -184,6 +187,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(successSeller, "Seller transfer failed");
 
         _transfer(listing.seller, msg.sender, tokenId);
+        tokenPurchasePrice[tokenId] = listing.priceWei;
 
         emit TicketResold(tokenId, listing.seller, msg.sender, listing.priceWei);
     }
@@ -205,6 +209,10 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
     function getResaleListing(uint256 tokenId) public view returns (ResaleListing memory) {
         return resaleListings[tokenId];
+    }
+
+    function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48) {
+        return tokenPurchasePrice[tokenId];
     }
 
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {

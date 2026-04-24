@@ -22,6 +22,7 @@ export async function fetchData() {
         const eventId = await contract.tokenToEvent(i);
         const evt = await contract.fetchEventData(eventId);
         const listing = await contract.getResaleListing(i);
+        const purchasePrice = await contract.getTokenPurchasePrice(i);
 
         tickets.push({
           tokenId: i,
@@ -29,6 +30,7 @@ export async function fetchData() {
           eventName: evt.ipfsHash || `Event #${Number(eventId)}`,
           isListed: listing.active,
           listingPrice: listing.active ? listing.priceWei : null,
+          purchasePrice: purchasePrice.toString(),
         });
       }
     } catch (err) {
@@ -98,6 +100,10 @@ export function renderMyTickets(tickets, container, onRefresh) {
         <div class="card-stat">
           <span class="stat-label">Event ID</span>
           <span class="stat-value">#${ticket.eventId}</span>
+        </div>
+        <div class="card-stat">
+          <span class="stat-label">Purchase Price</span>
+          <span class="stat-value">${ethers.formatEther(BigInt(ticket.purchasePrice) * BigInt(1e9))} ETH</span>
         </div>
         ${ticket.isListed ? `
           <div class="card-stat">
