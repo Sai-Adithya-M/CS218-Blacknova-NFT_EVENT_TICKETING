@@ -43,7 +43,7 @@ const CONTRACT_ABI = [
 ];
 
 export const MyTickets: React.FC = () => {
-  const { tickets, isLoading: isTicketsLoading, listForResale, cancelResale } = useTicketStore();
+  const { tickets, isLoading: isTicketsLoading, listTicketForResale, cancelResale } = useTicketStore();
   const { events, isLoading: isEventsLoading } = useEventStore();
   const { user } = useAuthStore();
   const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
@@ -74,7 +74,7 @@ export const MyTickets: React.FC = () => {
       const priceWei = ethers.parseEther(price.toString());
       const tx = await contract.listForResale(ticket.tokenId, priceWei);
       await tx.wait();
-      listForResale(ticket.id, price);
+      listTicketForResale(ticket.id, price);
       setActiveResaleId(null);
       setResaleInputs(prev => { const next = { ...prev }; delete next[ticket.id]; return next; });
     } catch (err: any) {
