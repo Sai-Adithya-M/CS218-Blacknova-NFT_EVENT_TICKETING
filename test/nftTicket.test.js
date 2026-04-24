@@ -12,8 +12,12 @@ describe("NFTTicket", function () {
   const TIER_GOLD = 1;
   const TIER_VIP = 2;
 
-  // Royalty: 1000 bps = 10 %  (royaltyBps is uint96, so this is fine)
+  // Royalty: 10%
   const ROYALTY_BPS = 10;
+
+  // Helper: default tier setup for tests (all tiers share total supply)
+  const defaultTierIds = [TIER_SILVER, TIER_GOLD, TIER_VIP];
+  const defaultTierSupplies = [40, 30, 30]; // total = 100
 
   beforeEach(async function () {
     [deployer, organiser, buyer, buyer2] = await ethers.getSigners();
@@ -26,7 +30,7 @@ describe("NFTTicket", function () {
     it("Creates an event successfully", async function () {
       const tx = await contract
         .connect(organiser)
-        .createEvent("QmFakeIpfsHash123", 100, ONE_ETH_GWEI, ROYALTY_BPS);
+        .createEvent("QmFakeIpfsHash123", 100, ONE_ETH_GWEI, ROYALTY_BPS, defaultTierIds, defaultTierSupplies);
       const receipt = await tx.wait();
       console.log("  ⛽  createEvent gas:", receipt.gasUsed.toString());
 
@@ -36,11 +40,15 @@ describe("NFTTicket", function () {
       expect(evt.organiser).to.equal(organiser.address);
       expect(evt.royaltyBps).to.equal(ROYALTY_BPS);
 
+      // Per-tier limits were set
+      const [silverSold, silverMax] = await contract.getTierData(1, TIER_SILVER);
+      expect(silverMax).to.equal(40);
+      expect(silverSold).to.equal(0);
     });
 
     it("Reverts with empty IPFS hash", async function () {
       await expect(
-        contract.connect(organiser).createEvent("", 10, ONE_ETH_GWEI, ROYALTY_BPS)
+        contract.connect(organiser).createEvent("", 10, ONE_ETH_GWEI, ROYALTY_BPS, [TIER_SILVER], [10])
       ).to.be.revertedWith("IPFS hash cannot be empty");
     });
   });
@@ -50,25 +58,30 @@ describe("NFTTicket", function () {
     beforeEach(async function () {
       await contract
         .connect(organiser)
-        .createEvent("QmOriginalHash", 50, ONE_ETH_GWEI, ROYALTY_BPS);
+        .createEvent("QmOriginalHash", 50, ONE_ETH_GWEI, ROYALTY_BPS, [TIER_SILVER, TIER_GOLD], [30, 20]);
     });
 
     it("Organiser can edit their event", async function () {
       const newPriceGwei = ethers.parseUnits("2", "gwei");
       const tx = await contract
         .connect(organiser)
-        .editEvent(1, 100, newPriceGwei);
+        .editEvent(1, 100, newPriceGwei, [TIER_SILVER, TIER_GOLD], [60, 40]);
       const receipt = await tx.wait();
       console.log("  ⛽  editEvent gas:", receipt.gasUsed.toString());
 
       const evt = await contract.fetchEventData(1);
       expect(evt.maxTickets).to.equal(100);
       expect(evt.priceWei).to.equal(newPriceGwei);
+
+      const [, silverMax] = await contract.getTierData(1, TIER_SILVER);
+      const [, goldMax] = await contract.getTierData(1, TIER_GOLD);
+      expect(silverMax).to.equal(60);
+      expect(goldMax).to.equal(40);
     });
 
     it("Non-organiser cannot edit event", async function () {
       await expect(
-        contract.connect(buyer).editEvent(1, 100, ONE_ETH_GWEI)
+        contract.connect(buyer).editEvent(1, 100, ONE_ETH_GWEI, [TIER_SILVER], [100])
       ).to.be.revertedWith("Not the organiser");
     });
   });
@@ -78,7 +91,7 @@ describe("NFTTicket", function () {
     beforeEach(async function () {
       await contract
         .connect(organiser)
-        .createEvent("QmFakeIpfsHash123", 10, ONE_ETH_GWEI, ROYALTY_BPS);
+        .createEvent("QmFakeIpfsHash123", 10, ONE_ETH_GWEI, ROYALTY_BPS, [TIER_SILVER, TIER_GOLD, TIER_VIP], [4, 3, 3]);
     });
 
     it("Buys a single Silver ticket", async function () {
@@ -90,6 +103,9 @@ describe("NFTTicket", function () {
 
       expect(await contract.ownerOf(1)).to.equal(buyer.address);
       expect(await contract.tokenToTier(1)).to.equal(TIER_SILVER);
+
+      const [silverSold] = await contract.getTierData(1, TIER_SILVER);
+      expect(silverSold).to.equal(1);
     });
 
     it("Buys multiple VIP tickets", async function () {
@@ -104,19 +120,56 @@ describe("NFTTicket", function () {
         expect(await contract.ownerOf(i)).to.equal(buyer.address);
         expect(await contract.tokenToTier(i)).to.equal(TIER_VIP);
       }
+
+      const [vipSold] = await contract.getTierData(1, TIER_VIP);
+      expect(vipSold).to.equal(3);
     });
 
     it("Buying beyond max tickets reverts", async function () {
       // Buy all 10
       await contract
         .connect(buyer)
-        .buyTicket(1, 10, TIER_SILVER, { value: ONE_ETH_WEI * 10n });
+        .buyTicket(1, 4, TIER_SILVER, { value: ONE_ETH_WEI * 4n });
+      await contract
+        .connect(buyer)
+        .buyTicket(1, 3, TIER_GOLD, { value: ONE_ETH_WEI * 3n });
+      await contract
+        .connect(buyer)
+        .buyTicket(1, 3, TIER_VIP, { value: ONE_ETH_WEI * 3n });
       // Try to buy one more
       await expect(
         contract
           .connect(buyer2)
           .buyTicket(1, 1, TIER_SILVER, { value: ONE_ETH_WEI })
       ).to.be.revertedWith("Not enough tickets available");
+    });
+
+    it("Reverts when a specific tier is sold out", async function () {
+      // Silver has max 4 — buy all 4
+      await contract
+        .connect(buyer)
+        .buyTicket(1, 4, TIER_SILVER, { value: ONE_ETH_WEI * 4n });
+
+      // Try to buy one more Silver — should revert with tier error
+      await expect(
+        contract
+          .connect(buyer2)
+          .buyTicket(1, 1, TIER_SILVER, { value: ONE_ETH_WEI })
+      ).to.be.revertedWith("Tier sold out");
+    });
+
+    it("Can still buy other tiers when one tier is maxed", async function () {
+      // Max out Silver (4)
+      await contract
+        .connect(buyer)
+        .buyTicket(1, 4, TIER_SILVER, { value: ONE_ETH_WEI * 4n });
+
+      // Gold should still work
+      await expect(
+        contract
+          .connect(buyer2)
+          .buyTicket(1, 1, TIER_GOLD, { value: ONE_ETH_WEI })
+      ).to.not.be.reverted;
     });
 
     it("Rejects insufficient ETH", async function () {
@@ -139,7 +192,7 @@ describe("NFTTicket", function () {
     beforeEach(async function () {
       await contract
         .connect(organiser)
-        .createEvent("QmBatchEvent", 50, ONE_ETH_GWEI, ROYALTY_BPS);
+        .createEvent("QmBatchEvent", 50, ONE_ETH_GWEI, ROYALTY_BPS, [TIER_SILVER, TIER_GOLD], [30, 20]);
     });
 
     it("Buys batch tickets across tiers", async function () {
@@ -160,6 +213,20 @@ describe("NFTTicket", function () {
       expect(await contract.tokenToTier(1)).to.equal(TIER_SILVER);
       expect(await contract.tokenToTier(2)).to.equal(TIER_SILVER);
       expect(await contract.tokenToTier(3)).to.equal(TIER_GOLD);
+
+      const [silverSold] = await contract.getTierData(1, TIER_SILVER);
+      const [goldSold] = await contract.getTierData(1, TIER_GOLD);
+      expect(silverSold).to.equal(2);
+      expect(goldSold).to.equal(1);
+    });
+
+    it("Batch reverts when a tier is sold out", async function () {
+      // Gold has max 20 — try to buy 21 in batch
+      await expect(
+        contract
+          .connect(buyer)
+          .buyBatchTickets(1, [TIER_GOLD], [21], { value: ONE_ETH_WEI * 21n })
+      ).to.be.revertedWith("Tier sold out");
     });
   });
 
@@ -171,7 +238,7 @@ describe("NFTTicket", function () {
     beforeEach(async function () {
       await contract
         .connect(organiser)
-        .createEvent("QmConcertHash", 10, ONE_ETH_GWEI, ROYALTY_BPS);
+        .createEvent("QmConcertHash", 10, ONE_ETH_GWEI, ROYALTY_BPS, [TIER_SILVER], [10]);
       // Buyer purchases 1 Silver ticket  →  tokenId = 1
       await contract
         .connect(buyer)

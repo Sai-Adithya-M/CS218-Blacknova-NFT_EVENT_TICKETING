@@ -15,7 +15,7 @@ import { config } from '../config';
 import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory ipfsHash, uint24 maxTickets, uint40 priceWei, uint8 royaltyBps) external",
+  "function createEvent(string memory ipfsHash, uint24 maxTickets, uint40 priceWei, uint8 royaltyBps, uint8[] memory tierIds, uint24[] memory tierSupplies) external",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
@@ -186,7 +186,11 @@ export const ManageEvents: React.FC = () => {
         throw new Error("Failed to upload metadata to IPFS: " + err.message);
       }
 
-      const tx = await contract.createEvent(ipfsHash, totalSupply, basePriceWei, royaltyBps);
+      // Build tier arrays for per-tier supply tracking on-chain
+      const tierIds = parsedTiers.map((_: any, i: number) => i);
+      const tierSuppliesArr = parsedTiers.map((t: any) => t.supply);
+
+      const tx = await contract.createEvent(ipfsHash, totalSupply, basePriceWei, royaltyBps, tierIds, tierSuppliesArr);
       const receipt = await tx.wait();
 
       let blockchainEventId = `evt_${Date.now()}`;

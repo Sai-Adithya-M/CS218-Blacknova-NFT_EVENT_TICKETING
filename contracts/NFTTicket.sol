@@ -12,6 +12,8 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
     enum Tier { Silver, Gold, VIP }
 
+    // ── Event struct: exactly 1 storage slot (32 bytes) ──────────────────
+    // address(20) + uint40(5) + uint24(3) + uint24(3) + uint8(1) = 32
     struct Event {
         address organiser;   
         uint40 priceWei;     
@@ -32,6 +34,10 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint256 => ResaleListing) public resaleListings;
     mapping(uint256 => uint48) public tokenPurchasePrice; // gwei, tracks actual price paid
 
+    // ── Per-tier tracking (uint24 matches maxTickets/ticketsSold size) ───
+    mapping(uint256 => mapping(uint8 => uint24)) public tierTicketsSold;
+    mapping(uint256 => mapping(uint8 => uint24)) public tierMaxTickets;
+
     event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash);
     event EventUpdated(uint256 indexed eventId, uint24 newMaxTickets, uint40 newPriceWei);
     event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier);
@@ -42,11 +48,19 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(string memory ipfsHash, uint24 maxTickets, uint40 priceWei, uint8 royaltyBps) external {
+    function createEvent(
+        string memory ipfsHash,
+        uint24 maxTickets,
+        uint40 priceWei,
+        uint8 royaltyBps,
+        uint8[] memory tierIds,
+        uint24[] memory tierSupplies
+    ) external {
         require(maxTickets > 0, "Must have tickets");
         require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
         require(priceWei > 0, "Price must be greater than zero");
         require(royaltyBps <= 100, "Royalty cannot exceed 100%");
+        require(tierIds.length == tierSupplies.length, "Tier arrays mismatch");
 
         uint256 eventId = nextEventId;
         events[eventId] = Event({
@@ -56,19 +70,44 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
             ticketsSold: 0,
             royaltyBps:  royaltyBps
         });
+
+        // Store per-tier supply limits
+        for (uint256 i = 0; i < tierIds.length; ) {
+            tierMaxTickets[eventId][tierIds[i]] = tierSupplies[i];
+            unchecked { i++; }
+        }
+
         unchecked { nextEventId++; }
         emit EventCreated(eventId, msg.sender, ipfsHash);
     }
 
-    function editEvent(uint256 eventId, uint24 newMaxTickets, uint40 newPriceWei) external {
+    function editEvent(
+        uint256 eventId,
+        uint24 newMaxTickets,
+        uint40 newPriceWei,
+        uint8[] memory tierIds,
+        uint24[] memory tierSupplies
+    ) external {
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event does not exist");
         require(msg.sender == evt.organiser, "Not the organiser");
         require(newMaxTickets >= evt.ticketsSold, "Cannot reduce max below sold");
         require(newPriceWei > 0, "Price must be > 0");
+        require(tierIds.length == tierSupplies.length, "Tier arrays mismatch");
 
         evt.maxTickets = newMaxTickets;
         evt.priceWei = newPriceWei;
+
+        // Update per-tier supply limits (each must be >= its sold count)
+        for (uint256 i = 0; i < tierIds.length; ) {
+            require(
+                tierSupplies[i] >= tierTicketsSold[eventId][tierIds[i]],
+                "Cannot reduce tier below sold"
+            );
+            tierMaxTickets[eventId][tierIds[i]] = tierSupplies[i];
+            unchecked { i++; }
+        }
+
         emit EventUpdated(eventId, newMaxTickets, newPriceWei);
     }
 
@@ -78,6 +117,16 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(evt.organiser != address(0), "Event does not exist");
         require(evt.ticketsSold + quantity <= evt.maxTickets, "Not enough tickets available");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
+
+        // Per-tier supply check (only if tier limit was set, i.e. > 0)
+        uint24 tierMax = tierMaxTickets[eventId][tier];
+        if (tierMax > 0) {
+            require(
+                tierTicketsSold[eventId][tier] + quantity <= tierMax,
+                "Tier sold out"
+            );
+        }
+
         // priceWei is stored in gwei; multiply by 1e9 to get wei
         require(msg.value >= uint256(evt.priceWei) * 1e9 * quantity, "Incorrect ETH amount");
         
@@ -97,6 +146,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         }
 
         evt.ticketsSold += quantity;
+        tierTicketsSold[eventId][tier] += quantity;
         
         (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
@@ -119,6 +169,18 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         // priceWei is stored in gwei; multiply by 1e9 to get wei
         require(msg.value >= uint256(evt.priceWei) * 1e9 * totalQuantity, "Incorrect ETH amount");
 
+        // Per-tier supply checks first (fail-fast before minting)
+        for (uint256 i = 0; i < tiers.length; ) {
+            uint24 tierMax = tierMaxTickets[eventId][tiers[i]];
+            if (tierMax > 0) {
+                require(
+                    tierTicketsSold[eventId][tiers[i]] + quantities[i] <= tierMax,
+                    "Tier sold out"
+                );
+            }
+            unchecked { i++; }
+        }
+
         for (uint256 t = 0; t < tiers.length; ) {
             uint24 qty = quantities[t];
             uint8 tier = tiers[t];
@@ -137,6 +199,8 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
                     i++; 
                 }
             }
+
+            tierTicketsSold[eventId][tier] += qty;
             unchecked { t++; }
         }
 
@@ -213,6 +277,10 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
     function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48) {
         return tokenPurchasePrice[tokenId];
+    }
+
+    function getTierData(uint256 eventId, uint8 tier) public view returns (uint24 sold, uint24 max) {
+        return (tierTicketsSold[eventId][tier], tierMaxTickets[eventId][tier]);
     }
 
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
