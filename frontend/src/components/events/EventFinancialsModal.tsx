@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, TrendingUp, Wallet, Ticket, PieChart, Info, ArrowUpRight } from 'lucide-react';
+import { X, TrendingUp, Wallet, Ticket, PieChart, Info, ArrowUpRight, Loader2 } from 'lucide-react';
 import { ethers } from 'ethers';
-import type { Event } from '../../store/useEventStore';
+import { useEventStore, type Event } from '../../store/useEventStore';
 import { config } from '../../config';
 
 interface EventFinancialsModalProps {
@@ -11,8 +11,19 @@ interface EventFinancialsModalProps {
 }
 
 export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ event, onClose }) => {
+  const { loadEventGasCost } = useEventStore();
   const [showFiat, setShowFiat] = useState(false);
+  const [isCalculatingGas, setIsCalculatingGas] = useState(false);
   const ETH_PRICE = 3500; // Mock ETH price
+
+  React.useEffect(() => {
+    if (event.txHash && !event.deploymentCost && !isCalculatingGas) {
+      setIsCalculatingGas(true);
+      loadEventGasCost(event.id, event.txHash).finally(() => {
+        setIsCalculatingGas(false);
+      });
+    }
+  }, [event.id, event.txHash, event.deploymentCost]);
 
   // Defensive Calculations
   const deploymentCostEth = parseFloat(ethers.formatEther(event.deploymentCost || "0"));
@@ -96,7 +107,9 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                 <Wallet size={48} />
               </div>
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Deployment Cost</p>
-              <h3 className="text-3xl font-black text-white italic">{formatValue(deploymentCostEth)}</h3>
+              <h3 className="text-3xl font-black text-white italic">
+                {isCalculatingGas ? <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-teal)]" /> : formatValue(deploymentCostEth)}
+              </h3>
               <div className="mt-4 flex items-center gap-2">
                 <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-tighter">Gas: {parseInt(event.gasUsed || "0").toLocaleString()} units</span>
               </div>

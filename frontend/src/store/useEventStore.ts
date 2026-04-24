@@ -8,7 +8,8 @@ import { fetchFromIPFS } from '../utils/ipfs';
 const ABI = [
   "function nextEventId() public view returns (uint)",
   "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
-  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)"
+  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)",
+  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
 
@@ -40,6 +41,7 @@ export interface Event {
   hasIpfsError?: boolean;
   deploymentCost?: string; // Total gas cost in Wei
   gasUsed?: string;       // Units of gas used
+  txHash?: string;
   _tierSales?: Record<number, number>;
 }
 
@@ -51,6 +53,7 @@ interface EventState {
   incrementTierSold: (eventId: string, tierId: string) => void;
   fetchEventsFromChain: () => Promise<void>;
   retryMetadata: (eventId: string, ipfsHash: string, retryCount?: number) => Promise<void>;
+  loadEventGasCost: (eventId: string, txHash: string) => Promise<void>;
 }
 
 
@@ -112,6 +115,28 @@ export const useEventStore = create<EventState>((set, get) => ({
     }
   },
 
+  loadEventGasCost: async (eventId, txHash) => {
+    try {
+      const provider = getReadProvider();
+      const receipt = await provider.getTransactionReceipt(txHash);
+      if (receipt) {
+        const gasUsed = receipt.gasUsed;
+        const gasPrice = receipt.gasPrice || (await provider.getFeeData()).gasPrice || BigInt(0);
+        const costWei = gasUsed * gasPrice;
+        
+        set(state => ({
+          events: state.events.map(e => e.id === eventId ? {
+            ...e,
+            gasUsed: gasUsed.toString(),
+            deploymentCost: costWei.toString()
+          } : e)
+        }));
+      }
+    } catch (err) {
+      console.warn("Failed to load gas cost for event:", eventId, err);
+    }
+  },
+
   fetchEventsFromChain: async () => {
     if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
       console.warn("EventStore: No contract address configured");
@@ -165,6 +190,29 @@ export const useEventStore = create<EventState>((set, get) => ({
         console.warn("EventStore: Failed to fetch minted logs:", logErr);
       }
 
+      // 4. Fetch EventCreated logs to get tx hashes
+      const eventTxHashes: Record<string, string> = {};
+      try {
+        const createdFilter = contract.filters.EventCreated();
+        const fromBlock = config.deploymentBlock || 5700000;
+        
+        let createdLogs: any[] = [];
+        try {
+          createdLogs = await contract.queryFilter(createdFilter, fromBlock);
+        } catch(e) {
+          createdLogs = await contract.queryFilter(createdFilter, -10000).catch(() => []);
+        }
+        
+        createdLogs.forEach((log: any) => {
+          if (log.args && log.transactionHash) {
+            const eId = `evt_${log.args.eventId.toString()}`;
+            eventTxHashes[eId] = log.transactionHash;
+          }
+        });
+      } catch (logErr) {
+        console.warn("EventStore: Failed to fetch EventCreated logs:", logErr);
+      }
+
       const updatedEvents: Event[] = onChainData.map((evt, idx): Event | null => {
         const i = idx + 1;
         const eventId = `evt_${i}`;
@@ -193,6 +241,7 @@ export const useEventStore = create<EventState>((set, get) => ({
             supply: Number(evt.maxTickets || evt[0]), 
             sold: tierSales[0] || onChainTotalSold 
           }],
+          txHash: eventTxHashes[eventId],
           _tierSales: tierSales
         };
       }).filter((e): e is Event => e !== null);
