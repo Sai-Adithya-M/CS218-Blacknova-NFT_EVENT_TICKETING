@@ -53,7 +53,7 @@ interface EventState {
   incrementTierSold: (eventId: string, tierId: string) => void;
   fetchEventsFromChain: () => Promise<void>;
   retryMetadata: (eventId: string, ipfsHash: string, retryCount?: number) => Promise<void>;
-  loadEventGasCost: (eventId: string, txHash: string) => Promise<void>;
+  loadEventGasCost: (eventId: string, txHash?: string) => Promise<void>;
 }
 
 
@@ -115,10 +115,36 @@ export const useEventStore = create<EventState>((set, get) => ({
     }
   },
 
-  loadEventGasCost: async (eventId, txHash) => {
+  loadEventGasCost: async (eventId, txHash?: string) => {
     try {
       const provider = getReadProvider();
-      const receipt = await provider.getTransactionReceipt(txHash);
+      let actualTxHash = txHash;
+
+      if (!actualTxHash && config.contractAddress) {
+        const contract = new ethers.Contract(config.contractAddress, ABI, provider);
+        const numericEventId = Number(eventId.replace('evt_', ''));
+        const createdFilter = contract.filters.EventCreated(numericEventId);
+        
+        let latestBlock = await provider.getBlockNumber();
+        const startBlock = config.deploymentBlock || 5700000;
+        
+        // Scan backwards in 10k chunks
+        while (latestBlock >= startBlock && !actualTxHash) {
+          const fromBlock = Math.max(startBlock, latestBlock - 10000);
+          try {
+            const logs = await contract.queryFilter(createdFilter, fromBlock, latestBlock);
+            if (logs && logs.length > 0) {
+              actualTxHash = logs[0].transactionHash;
+              break;
+            }
+          } catch(e) {}
+          latestBlock = fromBlock - 1;
+        }
+      }
+
+      if (!actualTxHash) return;
+
+      const receipt = await provider.getTransactionReceipt(actualTxHash);
       if (receipt) {
         const gasUsed = receipt.gasUsed;
         const gasPrice = receipt.gasPrice || (await provider.getFeeData()).gasPrice || BigInt(0);
@@ -127,6 +153,7 @@ export const useEventStore = create<EventState>((set, get) => ({
         set(state => ({
           events: state.events.map(e => e.id === eventId ? {
             ...e,
+            txHash: actualTxHash,
             gasUsed: gasUsed.toString(),
             deploymentCost: costWei.toString()
           } : e)

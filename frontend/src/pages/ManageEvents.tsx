@@ -709,7 +709,7 @@ export const ManageEvents: React.FC = () => {
 
       {selectedFinancials && (
         <EventFinancialsModal
-          event={selectedFinancials}
+          eventId={selectedFinancials.id}
           onClose={() => setSelectedFinancials(null)}
         />
       )}

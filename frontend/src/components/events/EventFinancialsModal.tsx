@@ -6,24 +6,28 @@ import { useEventStore, type Event } from '../../store/useEventStore';
 import { config } from '../../config';
 
 interface EventFinancialsModalProps {
-  event: Event;
+  eventId: string;
   onClose: () => void;
 }
 
-export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ event, onClose }) => {
-  const { loadEventGasCost } = useEventStore();
+export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ eventId, onClose }) => {
+  const { events, loadEventGasCost } = useEventStore();
+  const event = events.find(e => e.id === eventId);
+  
   const [showFiat, setShowFiat] = useState(false);
   const [isCalculatingGas, setIsCalculatingGas] = useState(false);
   const ETH_PRICE = 3500; // Mock ETH price
 
   React.useEffect(() => {
-    if (event.txHash && !event.deploymentCost && !isCalculatingGas) {
+    if (event && !event.deploymentCost && !isCalculatingGas) {
       setIsCalculatingGas(true);
       loadEventGasCost(event.id, event.txHash).finally(() => {
         setIsCalculatingGas(false);
       });
     }
-  }, [event.id, event.txHash, event.deploymentCost]);
+  }, [event?.id, event?.txHash, event?.deploymentCost]);
+
+  if (!event) return null;
 
   // Defensive Calculations
   const deploymentCostEth = parseFloat(ethers.formatEther(event.deploymentCost || "0"));
