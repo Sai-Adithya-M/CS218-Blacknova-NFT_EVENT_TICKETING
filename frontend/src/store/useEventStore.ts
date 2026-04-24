@@ -8,7 +8,9 @@ import { fetchFromIPFS } from '../utils/ipfs';
 const ABI = [
   "function nextEventId() public view returns (uint)",
   "function nextTokenId() public view returns (uint256)",
-  "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
+  "function fetchEventData(uint eventId) public view returns (tuple(address organiser, uint96 royaltyBps, bool exists, string ipfsHash, uint8 numTiers, uint256 totalRevenue, uint256 totalRoyaltyEarned))",
+  "function getEventStats(uint256 eventId) public view returns (uint256 totalSold, uint256 totalRevenue, uint256 totalRoyaltyEarned, uint8 numTiers)",
+  "function getTierData(uint256 eventId, uint8 tierId) public view returns (tuple(string name, uint256 price, uint256 maxSupply, uint256 soldCount))",
   "function tokenToEvent(uint256 tokenId) public view returns (uint)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)"
 ];
@@ -40,9 +42,12 @@ export interface Event {
   status: 'active' | 'past' | 'cancelled';
   tiers: TicketTier[];
   hasIpfsError?: boolean;
-  deploymentCost?: string; // Total gas cost in Wei
-  gasUsed?: string;       // Units of gas used
+  ipfsLoaded?: boolean;
+  ipfsError?: boolean;
+  totalRevenue?: string;
+  totalRoyaltyEarned?: string;
   onChainTierSales?: Record<number, number>;
+  isOptimistic?: boolean;
 }
 
 interface EventState {
@@ -54,15 +59,16 @@ interface EventState {
   retryMetadata: (eventId: string, ipfsHash: string, retryCount?: number) => Promise<void>;
 }
 
-
-
 export const useEventStore = create<EventState>((set, get) => ({
   events: [],
   isLoading: false,
 
-  createEvent: (event) => set((state) => ({ 
-    events: [event, ...state.events] 
-  })),
+  createEvent: (event) => set((state) => {
+    // Prevent duplicate events if the real one comes in later
+    const exists = state.events.some(e => e.id === event.id);
+    if (exists) return state;
+    return { events: [event, ...state.events] };
+  }),
 
   incrementTierSold: (eventId, tierId) => set((state) => ({
     events: state.events.map(e => e.id === eventId ? {
@@ -72,43 +78,38 @@ export const useEventStore = create<EventState>((set, get) => ({
   })),
 
   retryMetadata: async (eventId, ipfsHash, retryCount = 0) => {
-    const metadata = await fetchIPFSMetadata(ipfsHash);
-    if (metadata) {
-      set((state) => ({
-        events: state.events.map(e => e.id === eventId ? {
-          ...e,
-          title: metadata.name || metadata.title || e.title,
-          description: metadata.description || e.description,
-          date: metadata.date || metadata.dateTime || e.date,
-          location: metadata.location || e.location,
-          category: metadata.category || e.category,
-          imageUrl: metadata.image || e.imageUrl,
-          hasIpfsError: false,
-          tiers: (metadata.tiers && Array.isArray(metadata.tiers)) ? metadata.tiers.map((t: any, tidx: number) => {
-            // onChainTierSales is the source of truth for per-tier sold counts
-            // existingTier only works for tidx=0 since the initial state has 1 placeholder tier
-            const onChainSold = (e.onChainTierSales && e.onChainTierSales[tidx]) || 0;
-            
-            console.log(`EventStore: Tier "${t.name}" (idx=${tidx}) onChainSold=${onChainSold}`);
-            
-            return {
-              id: t.id || `${eventId}_tier_${tidx}`,
-              name: t.name || 'Tier',
-              price: t.price || 0,
-              supply: t.supply || 0,
-              sold: onChainSold
-            };
-          }) : e.tiers
-        } : e)
-      }));
-    } else {
-      // Retry faster initially (5s), then slower (30s)
+    try {
+      const metadata = await fetchIPFSMetadata(ipfsHash);
+      if (metadata) {
+        set((state) => ({
+          events: state.events.map(e => e.id === eventId ? {
+            ...e,
+            title: metadata.name || metadata.title || e.title,
+            description: metadata.description || e.description,
+            date: metadata.date || metadata.dateTime || e.date,
+            location: metadata.location || e.location,
+            category: metadata.category || e.category,
+            imageUrl: metadata.image || e.imageUrl,
+            hasIpfsError: false,
+            ipfsLoaded: true,
+            ipfsError: false,
+            // Merge IPFS tier names with on-chain data if necessary
+            tiers: e.tiers.map((tier, idx) => ({
+              ...tier,
+              name: (metadata.tiers && metadata.tiers[idx]?.name) || tier.name,
+            }))
+          } : e)
+        }));
+      } else {
+        throw new Error("Metadata empty");
+      }
+    } catch (err) {
       const delay = retryCount < 5 ? 5000 : 30000;
       setTimeout(() => get().retryMetadata(eventId, ipfsHash, retryCount + 1), delay);
       
       if (retryCount > 2) {
          set((state) => ({
-           events: state.events.map(e => e.id === eventId ? { ...e, hasIpfsError: true } : e)
+           events: state.events.map(e => e.id === eventId ? { ...e, hasIpfsError: true, ipfsError: true, ipfsLoaded: false } : e)
          }));
       }
     }
@@ -116,114 +117,76 @@ export const useEventStore = create<EventState>((set, get) => ({
 
   fetchEventsFromChain: async () => {
     if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      console.warn("EventStore: No contract address configured");
       return;
     }
     
     set({ isLoading: true });
-    console.log("EventStore: Syncing from chain...", config.contractAddress);
 
     try {
       const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
       
-      // 1. Fetch total events
       const nextEventId = await contract.nextEventId();
       const totalEvents = Number(nextEventId) - 1;
-      console.log(`EventStore: Found ${totalEvents} events on-chain`);
 
       if (totalEvents <= 0) {
         set({ events: [], isLoading: false });
         return;
       }
 
-      // 2. Fetch event data from chain
-      const onChainData = await Promise.all(
-        Array.from({ length: totalEvents }, (_, i) => contract.fetchEventData(i + 1))
-      );
+      const updatedEvents: Event[] = [];
 
-      // 3. ⚡ Build per-tier sales by reading token state directly from contract
-      //    The deployed contract's TicketMinted event doesn't include the tier field,
-      //    so we read tokenToEvent(id) and tokenToTier(id) for each minted token.
-      const eventTierSales: Record<string, Record<number, number>> = {};
-      try {
-        const nextTokenId = await contract.nextTokenId();
-        const totalTokens = Number(nextTokenId) - 1;
-        console.log(`EventStore: Reading tier data for ${totalTokens} tokens from contract state...`);
-        
-        if (totalTokens > 0) {
-          // Batch read all tokens' event and tier mappings
-          const tokenReads = Array.from({ length: totalTokens }, (_, i) => i + 1).map(async (tokenId) => {
-            try {
-              const [eventIdBN, tierIdx] = await Promise.all([
-                contract.tokenToEvent(tokenId),
-                contract.tokenToTier(tokenId)
-              ]);
-              const eId = `evt_${eventIdBN.toString()}`;
-              const tier = Number(tierIdx);
-              return { eId, tier };
-            } catch {
-              return null;
-            }
-          });
+      for (let i = 1; i <= totalEvents; i++) {
+        try {
+          const evt = await contract.fetchEventData(i);
+          if (!evt.exists && !evt[2]) continue;
+
+          const stats = await contract.getEventStats(i);
+          const numTiers = Number(stats.numTiers || stats[3]);
           
-          const results = await Promise.all(tokenReads);
-          results.forEach(r => {
-            if (r) {
-              if (!eventTierSales[r.eId]) eventTierSales[r.eId] = {};
-              eventTierSales[r.eId][r.tier] = (eventTierSales[r.eId][r.tier] || 0) + 1;
-            }
+          const tiers: TicketTier[] = [];
+          for (let t = 0; t < numTiers; t++) {
+            const tData = await contract.getTierData(i, t);
+            tiers.push({
+              id: `tier_${i}_${t}`,
+              name: tData.name || tData[0],
+              price: parseFloat(ethers.formatEther(tData.price || tData[1])),
+              supply: Number(tData.maxSupply || tData[2]),
+              sold: Number(tData.soldCount || tData[3])
+            });
+          }
+
+          const eventId = `evt_${i}`;
+          updatedEvents.push({
+            id: eventId,
+            title: `Event #${i}`,
+            description: "Loading details from IPFS...",
+            date: "2099-12-31T00:00:00.000Z",
+            location: "Loading location...",
+            category: "Loading...",
+            organizerId: (evt.organiser || evt[0]).toLowerCase(),
+            royaltyBps: Number(evt.royaltyBps || evt[1]),
+            status: 'active',
+            tiers,
+            totalRevenue: ethers.formatEther(evt.totalRevenue || evt[5]),
+            totalRoyaltyEarned: ethers.formatEther(evt.totalRoyaltyEarned || evt[6]),
+            hasIpfsError: false,
+            ipfsLoaded: false,
+            ipfsError: false
           });
+
+          // Trigger metadata fetch
+          const hash = evt.ipfsHash || evt[3];
+          if (hash) get().retryMetadata(eventId, hash);
+        } catch (e) {
+          console.error(`Failed to fetch data for event ${i}:`, e);
         }
-        
-        console.log("EventStore: Tier sales breakdown:", JSON.stringify(eventTierSales));
-      } catch (tierErr) {
-        console.warn("EventStore: Failed to read tier sales from contract:", tierErr);
       }
 
-      const updatedEvents: Event[] = onChainData.map((evt, idx): Event | null => {
-        const i = idx + 1;
-        const eventId = `evt_${i}`;
-        
-        const exists = evt.exists !== undefined ? evt.exists : evt[5];
-        if (!exists) return null;
-
-
-        const tierSales = eventTierSales[eventId] || {};
-        
-        return {
-          id: eventId,
-          title: `Event #${i}`,
-          description: "Loading details from IPFS...",
-          date: "2099-12-31T00:00:00.000Z",
-          location: "Loading location...",
-          category: "Loading...",
-          organizerId: (evt.organiser || evt[3]).toLowerCase(),
-          royaltyBps: Number(evt.royaltyBps || evt[4]),
-          status: 'active' as const,
-          hasIpfsError: true,
-          onChainTierSales: tierSales,
-          tiers: [{ 
-            id: `tier_${eventId}_0`, 
-            name: 'Loading Tiers...', 
-            price: parseFloat(ethers.formatEther(evt.priceWei || evt[1])), 
-            supply: Number(evt.maxTickets || evt[0]), 
-            sold: tierSales[0] || 0 
-          }]
-        };
-      }).filter((e): e is Event => e !== null);
-
-      console.log(`EventStore: Successfully processed ${updatedEvents.length} events`);
-      set({ events: updatedEvents, isLoading: false });
-
-      updatedEvents.forEach(e => {
-        const onChain = onChainData[parseInt(e.id.split('_')[1]) - 1];
-        const hash = onChain?.ipfsHash || onChain?.[6];
-        if (hash) get().retryMetadata(e.id, hash);
-      });
-
+      const optimisticEvents = get().events.filter(e => e.isOptimistic);
+      set({ events: [...optimisticEvents, ...updatedEvents], isLoading: false });
     } catch (err) {
-      console.error("EventStore: Critical failure during chain sync:", err);
+      console.error("EventStore: Sync failure:", err);
       set({ isLoading: false });
     }
   }

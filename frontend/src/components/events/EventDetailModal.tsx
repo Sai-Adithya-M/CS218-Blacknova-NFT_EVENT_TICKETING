@@ -13,11 +13,12 @@ import { ethers } from 'ethers';
 import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
-  "function buyTicket(uint256 eventId, uint256 quantity, uint8 tier) public payable",
-  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint256[] memory quantities) public payable",
+  "function buyTicket(uint256 eventId, uint256 quantity, uint8 tierId) public payable",
+  "function buyBatchTickets(uint256 eventId, uint8[] calldata tierIds, uint256[] calldata quantities) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
-  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)",
-  "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei)"
+  "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
+  "event TicketPurchased(address indexed buyer, uint256 indexed eventId, uint8 tierId, uint256 price, uint256 royalty, uint256 organizerAmount)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 royaltyAmount)"
 ];
 
 
@@ -73,6 +74,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const handlePurchase = async () => {
     if (!isAuthenticated || !user) {
       alert("Please connect your wallet first.");
+      return;
+    }
+    if (!event.ipfsLoaded) {
+      setErrorMsg("Metadata not loaded yet. Please wait.");
+      setStep('error');
       return;
     }
     if (totalQuantity === 0) return;
@@ -140,6 +146,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
   const handleBuyResale = async () => {
     if (!isAuthenticated || !user) { alert("Please connect wallet."); return; }
+    if (!event.ipfsLoaded) {
+      setErrorMsg("Metadata not loaded yet. Please wait.");
+      setStep('error');
+      return;
+    }
     if (!selectedResaleTicket) return;
     setStep('confirming');
     try {
@@ -170,18 +181,37 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
             <button onClick={handleClose} className="absolute top-5 right-5 z-10 w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-all"><X size={18} /></button>
             {step === 'details' && (
               <div className="pb-8">
+                {!event.ipfsLoaded && !event.ipfsError && (
+                  <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0f]/90 backdrop-blur-md rounded-3xl">
+                    <Loader2 size={40} className="text-[var(--accent-teal)] animate-spin mb-4" />
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40">Syncing Metadata...</p>
+                  </div>
+                )}
+
+                {event.ipfsError && (
+                  <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0f]/95 backdrop-blur-md rounded-3xl p-8 text-center">
+                    <X size={40} className="text-red-500 mb-4" />
+                    <h3 className="text-xl font-black uppercase italic text-white mb-2">Metadata Sync Failed</h3>
+                    <p className="text-xs text-white/40 mb-8">We couldn't retrieve the event details from IPFS. Please check your connection or try again.</p>
+                    <button 
+                      onClick={() => useEventStore.getState().retryMetadata(event.id, event.id.replace('evt_', ''))} 
+                      className="px-8 py-3 rounded-xl bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)] hover:text-white transition-all shadow-xl"
+                    >
+                      Retry Sync
+                    </button>
+                  </div>
+                )}
+
                 <div className="relative h-56 overflow-hidden">
                   <img src={modalImageSrc} alt={event.title} className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
                   <div className="absolute bottom-6 left-6">
                     <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3 inline-block">Verified Event</span>
                     <h2 className="text-3xl font-black tracking-tight italic text-white">{event.title}</h2>
-
                   </div>
                 </div>
                 <div className="p-8 space-y-8">
                   <div className="flex flex-wrap gap-6 text-[11px] font-bold text-white/40 tracking-widest">
-
                     <span className="flex items-center gap-2"><Calendar size={14} className="text-[var(--accent-purple)]" /> {date.toLocaleDateString()}</span>
                     <span className="flex items-center gap-2"><MapPin size={14} className="text-[var(--accent-teal)]" /> {event.location}</span>
                     <span className="flex items-center gap-2"><Tag size={14} /> {event.category}</span>
@@ -203,7 +233,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                               <div className="flex items-center justify-between mb-4">
                                 <div>
                                   <p className="font-black tracking-tight italic text-sm text-white">{tier.name}</p>
-
                                   <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">{tier.sold} / {tier.supply} Sold</p>
                                 </div>
                                 <div className="text-right">
@@ -232,7 +261,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                             <button key={t.id} onClick={() => setSelectedResaleTicket(t)} className={`flex items-center justify-between p-5 rounded-2xl border transition-all text-left ${selectedResaleTicket?.id === t.id ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 shadow-lg shadow-teal-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
                               <div>
                                 <p className="font-black tracking-tight italic text-sm text-white">{t.tierName}</p>
-
                                 <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">Token #{t.tokenId.slice(-6)}</p>
                               </div>
                               <p className="text-sm font-black text-white">{t.resalePrice} ETH</p>
@@ -254,9 +282,15 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                       </div>
                     )}
                     {!isOrganizer && (
-                      <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }} disabled={marketType === 'primary' ? totalQuantity === 0 : !selectedResaleTicket} onClick={marketType === 'primary' ? handlePurchase : handleBuyResale} className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center gap-3 transition-all ${(marketType === 'primary' ? totalQuantity > 0 : selectedResaleTicket) ? 'bg-white text-black shadow-xl hover:bg-[var(--accent-teal)] hover:text-white' : 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'}`}>
-                        {marketType === 'primary' ? <ShoppingBag size={16} /> : <Wallet size={16} />}
-                        {marketType === 'primary' ? (totalQuantity > 0 ? `Checkout ( ${totalPrice.toFixed(3)} ETH )` : 'Select Tickets') : 'Buy Resale Ticket'}
+                      <motion.button 
+                        whileHover={{ scale: 1.01 }} 
+                        whileTap={{ scale: 0.99 }} 
+                        disabled={!event.ipfsLoaded || (marketType === 'primary' ? totalQuantity === 0 : !selectedResaleTicket)} 
+                        onClick={marketType === 'primary' ? handlePurchase : handleBuyResale} 
+                        className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center gap-3 transition-all ${(!event.ipfsLoaded || (marketType === 'primary' ? totalQuantity === 0 : !selectedResaleTicket)) ? 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5' : 'bg-white text-black shadow-xl hover:bg-[var(--accent-teal)] hover:text-white'}`}
+                      >
+                        {!event.ipfsLoaded ? <Loader2 size={16} className="animate-spin" /> : marketType === 'primary' ? <ShoppingBag size={16} /> : <Wallet size={16} />}
+                        {!event.ipfsLoaded ? 'Loading Metadata...' : marketType === 'primary' ? (totalQuantity > 0 ? `Checkout ( ${totalPrice.toFixed(3)} ETH )` : 'Select Tickets') : 'Buy Resale Ticket'}
                       </motion.button>
                     )}
                   </div>

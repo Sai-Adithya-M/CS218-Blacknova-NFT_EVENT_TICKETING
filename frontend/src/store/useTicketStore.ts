@@ -1,19 +1,20 @@
 import { create } from 'zustand';
 import { ethers } from 'ethers';
 import { config } from '../config';
-import { getReadProvider } from '../utils/blockchain';
-import { fetchFromIPFS } from '../utils/ipfs';
+import { getReadProvider, getBrowserProvider } from '../utils/blockchain';
 
 const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
-  "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
+  "function fetchEventData(uint eventId) public view returns (tuple(address organiser, uint96 royaltyBps, bool exists, string ipfsHash, uint8 numTiers, uint256 totalRevenue, uint256 totalRoyaltyEarned))",
+  "function getTierData(uint256 eventId, uint8 tierId) public view returns (tuple(string name, uint256 price, uint256 maxSupply, uint256 soldCount))",
   "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
-  "function nextTokenId() public view returns (uint256)"
+  "function nextTokenId() public view returns (uint256)",
+  "function balanceOf(address owner) public view returns (uint256)",
+  "function tokenOfOwnerByIndex(address owner, uint256 index) public view returns (uint256)",
+  "function tokenURI(uint256 tokenId) public view returns (string memory)"
 ];
-
-// Tier name fallback will be handled dynamically in the sync logic
 
 export type TicketStatus = 'active' | 'used' | 'resale';
 
@@ -85,90 +86,107 @@ export const useTicketStore = create<TicketState>((set) => ({
   })),
 
   fetchTicketsFromChain: async (userAddress?: string) => {
-    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") {
-      return;
-    }
+    if (!config.contractAddress || config.contractAddress === "0x0000000000000000000000000000000000000000") return;
 
     set({ isLoading: true });
     try {
-      console.log("Bulletproof Sync: Fetching tickets directly from contract state...");
-      const provider = getReadProvider();
+      const provider = getBrowserProvider() || getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
       
-      const loadedTickets: Ticket[] = [];
-      const metadataCache: Record<string, any> = {};
+      console.log(`[TicketStore] Fetching for ${userAddress} at ${config.contractAddress}`);
+      
+      const tierCache: Record<string, any> = {};
 
-      const nextTokenId = await contract.nextTokenId();
-      const totalTokens = Number(nextTokenId) - 1;
-
-      for (let i = 1; i <= totalTokens; i++) {
-        try {
-          const currentOwner = await contract.ownerOf(i);
-          const listing = await contract.getResaleListing(i);
-          const isActiveListing = listing.active || listing[2];
-          
-          const isUserOwned = userAddress && currentOwner.toLowerCase() === userAddress.toLowerCase();
-
-          if (isUserOwned || isActiveListing) {
-            const eventIdNum = await contract.tokenToEvent(i);
-            const tierIndex = await contract.tokenToTier(i);
-            const eventKey = eventIdNum.toString();
-
-            if (!metadataCache[eventKey]) {
-              const evtData = await contract.fetchEventData(eventIdNum);
-              const hash = evtData.ipfsHash || evtData[6];
-              metadataCache[eventKey] = {
-                data: evtData,
-                metadata: hash ? await fetchFromIPFS(hash, { json: true, timeout: 15000 }) : null
-              };
-            }
-
-            const { data: evt, metadata } = metadataCache[eventKey];
-            
-            // Priority for Tier Name:
-            // 1. Name from IPFS metadata (if loaded)
-            // 2. Descriptive fallback with index
-            let tierName = `Tier #${Number(tierIndex) + 1}`;
-            
-            if (metadata?.tiers?.[Number(tierIndex)]) {
-              tierName = metadata.tiers[Number(tierIndex)].name;
-            } else if (Number(tierIndex) === 0) {
-              tierName = 'General Admission'; // Common default for index 0
-            }
-
-            const resalePrice = isActiveListing ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined;
-            
-            // Try to get price from metadata, fallback to on-chain base price
-            let tierPrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
-            if (metadata?.tiers?.[Number(tierIndex)]) {
-              tierPrice = metadata.tiers[Number(tierIndex)].price;
-            }
-            
-            console.log(`TicketStore: Token #${i} → event=${eventKey}, tier=${Number(tierIndex)}, name="${tierName}", price=${tierPrice}, metadata=${metadata ? 'loaded' : 'null'}`);
-
-            loadedTickets.push({
-              id: `tkt_${i}`,
-              tokenId: i.toString(),
-              txHash: '', 
-              eventId: `evt_${eventIdNum}`,
-              ownerId: currentOwner,
-              tierName: tierName,
-              tierPrice: tierPrice,
-              status: isActiveListing ? 'resale' : 'active',
-              purchasedAt: new Date().toISOString(), 
-              resalePrice: resalePrice,
-            });
+      let tokenIdsToFetch: number[] = [];
+      
+      if (userAddress) {
+        const balanceBN = await contract.balanceOf(userAddress);
+        const balance = Number(balanceBN);
+        console.log(`[TicketStore] User Balance: ${balance}`);
+        
+        if (balance > 0) {
+          const idPromises = [];
+          for (let i = 0; i < balance; i++) {
+            idPromises.push(contract.tokenOfOwnerByIndex(userAddress, i));
           }
-        } catch (e) {
-          // Token skip
+          const ids = await Promise.all(idPromises);
+          tokenIdsToFetch = ids.map(id => Number(id));
+          console.log(`[TicketStore] Token IDs to fetch:`, tokenIdsToFetch);
         }
       }
 
-      set({ tickets: loadedTickets.reverse(), isLoading: false });
+      const ticketSettled = await Promise.allSettled(tokenIdsToFetch.map(async (tokenId): Promise<Ticket> => {
+        try {
+          // Fetch critical ownership and mapping data first
+          const [currentOwner, eventIdBN, tierIdx] = await Promise.all([
+            contract.ownerOf(tokenId),
+            contract.tokenToEvent(tokenId),
+            contract.tokenToTier(tokenId)
+          ]);
+
+          // Fetch resale and URI optionally (don't let them crash the load)
+          let listing = { active: false, priceWei: 0n };
+          try {
+            listing = await contract.getResaleListing(tokenId);
+          } catch (e) {
+            console.warn(`[TicketStore] Failed to fetch resale for #${tokenId}`);
+          }
+
+          let uri = "";
+          try {
+            uri = await contract.tokenURI(tokenId);
+            console.log(`[TicketStore] Token #${tokenId} URI: ${uri}`);
+          } catch (e) {
+            console.warn(`[TicketStore] Token #${tokenId} URI revert (safe to ignore)`);
+          }
+
+          const isActiveListing = listing.active || (listing as any)[2];
+          const tierKey = `${eventIdBN}_${tierIdx}`;
+
+          if (!tierCache[tierKey]) {
+            const tData = await contract.getTierData(eventIdBN, tierIdx);
+            tierCache[tierKey] = {
+              name: tData.name || (tData as any)[0],
+              price: parseFloat(ethers.formatEther(tData.price || (tData as any)[1]))
+            };
+          }
+
+          const tier = tierCache[tierKey];
+          const resalePrice = isActiveListing ? parseFloat(ethers.formatEther(listing.priceWei || (listing as any)[1])) : undefined;
+
+          return {
+            id: `tkt_${tokenId}`,
+            tokenId: tokenId.toString(),
+            txHash: '', 
+            eventId: `evt_${eventIdBN}`,
+            ownerId: currentOwner,
+            tierName: tier.name,
+            tierPrice: tier.price,
+            status: (isActiveListing ? 'resale' : 'active') as TicketStatus,
+            purchasedAt: new Date().toISOString(), 
+            resalePrice: resalePrice,
+          };
+        } catch (innerErr) {
+          console.error(`[TicketStore] Critical fetch failed for #${tokenId}:`, innerErr);
+          throw innerErr;
+        }
+      }));
+
+      ticketSettled.forEach((res, idx) => {
+        if (res.status === 'rejected') {
+          console.error(`[TicketStore] Ticket #${tokenIdsToFetch[idx]} rejected:`, res.reason);
+        }
+      });
+
+      const validTickets = ticketSettled
+        .filter((res): res is PromiseFulfilledResult<Ticket> => res.status === 'fulfilled')
+        .map(res => res.value);
+
+      console.log(`[TicketStore] Valid tickets found:`, validTickets.length);
+      set({ tickets: validTickets.reverse(), isLoading: false });
     } catch (err) {
-      console.error('fetchTicketsFromChain failed:', err);
+      console.error('[TicketStore] fetchTicketsFromChain fatal error:', err);
       set({ isLoading: false });
     }
-  }
+  },
 }));
-

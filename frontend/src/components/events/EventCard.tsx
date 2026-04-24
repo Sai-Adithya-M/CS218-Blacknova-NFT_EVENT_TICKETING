@@ -61,11 +61,11 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
         rotateY,
         transformStyle: "preserve-3d",
       }}
-      className={`group relative glass-panel rounded-3xl overflow-hidden border border-[var(--border-glass)] hover:border-[var(--accent-purple)]/50 transition-all duration-500 cursor-pointer flex flex-col bg-zinc-900/40 hover:bg-zinc-900/60 shadow-xl`}
+      className={`group relative glass-panel rounded-3xl overflow-hidden border border-[var(--border-glass)] hover:border-[var(--accent-purple)]/50 transition-all duration-500 cursor-pointer flex flex-col bg-zinc-900/40 hover:bg-zinc-900/60 shadow-xl ${event.isOptimistic ? 'opacity-70 grayscale-[0.3]' : ''}`}
     >
 
       {/* 1. Banner Image Section */}
-      <div className="relative h-44 overflow-hidden shrink-0">
+      <div className="relative h-44 overflow-hidden shrink-0 bg-white/5">
         <motion.img 
           src={currentImageSrc} 
           alt={event.title}
@@ -77,10 +77,17 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
         
         {/* Badges on top of image */}
         <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
-          <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-purple)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-purple)]/30 flex items-center gap-1.5 shadow-xl">
-            <Sparkles size={10} />
-            Verified
-          </span>
+          {event.isOptimistic ? (
+             <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-teal)]/30 flex items-center gap-1.5 shadow-xl animate-pulse">
+                <Sparkles size={10} className="animate-spin" />
+                Minting...
+             </span>
+          ) : (
+            <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-purple)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-purple)]/30 flex items-center gap-1.5 shadow-xl">
+              <Sparkles size={10} />
+              Verified
+            </span>
+          )}
           {event.tiers?.length > 1 && (
             <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-teal)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-teal)]/30 shadow-xl">
               {event.tiers.length} Tiers
@@ -115,12 +122,12 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
             <div className="flex flex-col gap-1 flex-1 pr-4">
               <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest text-white/30 mb-1">
                 <span>Availability</span>
-                <span>{Math.round(availability)}%</span>
+                <span>{Math.round(availability) || 0}%</span>
               </div>
               <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
-                  animate={{ width: `${availability}%` }}
+                  animate={{ width: `${availability || 0}%` }}
                   className="h-full bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]" 
                 />
               </div>
@@ -137,21 +144,28 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
             </div>
             
             {showEtherscan ? (
-              <a 
-                href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black uppercase text-white/60 hover:text-[var(--accent-teal)] hover:border-[var(--accent-teal)]/50 transition-all"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Etherscan
-              </a>
+              <div className="flex items-center gap-2">
+                {event.isOptimistic && (
+                  <div className="flex items-center gap-2 text-[8px] font-bold uppercase text-white/40 italic">
+                    <Loader2 size={10} className="animate-spin" /> Pending...
+                  </div>
+                )}
+                <a 
+                  href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black uppercase text-white/60 hover:text-[var(--accent-teal)] hover:border-[var(--accent-teal)]/50 transition-all ${event.isOptimistic ? 'pointer-events-none opacity-40' : ''}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Etherscan
+                </a>
+              </div>
 
             ) : (
               <motion.div 
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="px-6 py-2.5 rounded-xl bg-white text-black text-[10px] font-black uppercase tracking-widest shadow-xl hover:shadow-white/10 transition-all italic"
+                className={`px-6 py-2.5 rounded-xl bg-white text-black text-[10px] font-black uppercase tracking-widest shadow-xl hover:shadow-white/10 transition-all italic ${event.isOptimistic ? 'pointer-events-none opacity-40' : ''}`}
               >
                 Buy
               </motion.div>

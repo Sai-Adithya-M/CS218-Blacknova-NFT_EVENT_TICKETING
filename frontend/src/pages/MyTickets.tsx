@@ -23,7 +23,11 @@ const BannerImage: React.FC<{ src?: string; alt: string; className?: string }> =
 
 const CONTRACT_ABI = [
   "function listForResale(uint256 tokenId, uint256 priceWei) external",
-  "function cancelResaleListing(uint256 tokenId) external"
+  "function cancelResaleListing(uint256 tokenId) external",
+  "function buyResaleTicket(uint256 tokenId) public payable",
+  "function fetchEventData(uint eventId) public view returns (tuple(address organiser, uint96 royaltyBps, bool exists, string ipfsHash, uint8 numTiers, uint256 totalRevenue, uint256 totalRoyaltyEarned))",
+  "function getTierData(uint256 eventId, uint8 tierId) public view returns (tuple(string name, uint256 price, uint256 maxSupply, uint256 soldCount))",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 royaltyAmount)"
 ];
 
 export const MyTickets: React.FC = () => {
@@ -37,7 +41,8 @@ export const MyTickets: React.FC = () => {
 
   if (!user) return <AuthFallback />;
 
-  const myTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
+  const walletAddress = user.walletAddress || user.id;
+  const myTickets = tickets.filter(t => t.ownerId?.toLowerCase() === walletAddress?.toLowerCase());
 
   const filteredTickets = myTickets.filter(ticket => {
     const event = events.find(e => e.id === ticket.eventId);

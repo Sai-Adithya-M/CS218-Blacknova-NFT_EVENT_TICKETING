@@ -47,98 +47,99 @@ export function extractCid(url?: string): string | null {
  * Races multiple gateways to fetch content from IPFS.
  * Uses a staggered approach to avoid unnecessary network load while ensuring speed.
  */
+// In-memory cache for in-flight requests to prevent duplicate network calls
+const inFlightRequests = new Map<string, Promise<any>>();
+
+/**
+ * Races multiple gateways to fetch content from IPFS.
+ */
 export async function fetchFromIPFS(
   cidOrUrl: string, 
   options: { json?: boolean, timeout?: number, returnUrl?: boolean } = {}
 ): Promise<any> {
   const cid = extractCid(cidOrUrl);
-  if (!cid) {
-    console.warn('[IPFS] No CID found in:', cidOrUrl);
-    return null;
-  }
+  if (!cid) return null;
 
   const { json = true, timeout = 20000, returnUrl = false } = options;
-  console.log(`[IPFS] Starting fetch for CID: ${cid} (ReturnUrl: ${returnUrl})`);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    console.log(`[IPFS] Global timeout reached for CID: ${cid}`);
-    controller.abort();
-  }, timeout);
-
-  const attemptGateway = async (baseUrl: string) => {
-    const url = `${baseUrl}/${cid}`;
-    const start = Date.now();
-    
-    try {
-      // For probing (returnUrl: true), we try a very lightweight check.
-      // We use GET with a short timeout and potentially a Range header.
-      const response = await fetch(url, { 
-        signal: controller.signal,
-        method: returnUrl ? 'GET' : 'GET', // Stick to GET for maximum compatibility
-        headers: returnUrl ? { 'Range': 'bytes=0-0' } : {}
-      });
-
-      if (!response.ok) {
-        throw new Error(`Status ${response.status}`);
+  // 1. Check LocalStorage Cache (only for JSON metadata)
+  if (json && !returnUrl) {
+    const cached = localStorage.getItem(`ipfs_cache_${cid}`);
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        localStorage.removeItem(`ipfs_cache_${cid}`);
       }
-      
-      const duration = Date.now() - start;
-      console.log(`[IPFS] ✅ Gateway success: ${baseUrl} (${duration}ms)`);
-      
-      if (returnUrl) {
-        return url;
-      }
-      
-      const data = json ? await response.json() : response;
-      return data;
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        // Silent failure for aborted requests
-      } else {
-        console.warn(`[IPFS] ❌ Gateway failed: ${baseUrl} (${e.message})`);
-      }
-      throw e;
     }
-  };
+  }
 
+  // 2. Check In-Flight Requests
+  const requestKey = `${cid}_${json}_${returnUrl}`;
+  if (inFlightRequests.has(requestKey)) {
+    return inFlightRequests.get(requestKey);
+  }
 
-  // Staggered Tiers: Try fast ones immediately, then expand
-  const tiers = [
-    IPFS_GATEWAYS.slice(0, 4), // Aggressive first tier
-    IPFS_GATEWAYS.slice(4, 7),
-    IPFS_GATEWAYS.slice(7),
-  ];
+  const fetchPromise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
 
-  try {
-    const allPromises = [
-      ...tiers[0].map(gw => attemptGateway(gw)),
-      ...tiers[1].map(gw => new Promise((_, rej) => {
-        const t = setTimeout(() => {
-          attemptGateway(gw).then(_).catch(rej);
-        }, 500);
-        controller.signal.addEventListener('abort', () => clearTimeout(t));
-      })),
-      ...tiers[2].map(gw => new Promise((_, rej) => {
-        const t = setTimeout(() => {
-          attemptGateway(gw).then(_).catch(rej);
-        }, 1500);
-        controller.signal.addEventListener('abort', () => clearTimeout(t));
-      })),
+    const attemptGateway = async (baseUrl: string) => {
+      const url = `${baseUrl}/${cid}`;
+      try {
+        const response = await fetch(url, { 
+          signal: controller.signal,
+          headers: returnUrl ? { 'Range': 'bytes=0-0' } : {}
+        });
+
+        if (!response.ok) throw new Error(`Status ${response.status}`);
+        
+        if (returnUrl) return url;
+        
+        const data = json ? await response.json() : response;
+        
+        // Cache successful JSON responses
+        if (json && !returnUrl && data) {
+          localStorage.setItem(`ipfs_cache_${cid}`, JSON.stringify(data));
+        }
+        
+        return data;
+      } catch (e: any) {
+        throw e;
+      }
+    };
+
+    const tiers = [
+      IPFS_GATEWAYS.slice(0, 3), 
+      IPFS_GATEWAYS.slice(3, 6),
+      IPFS_GATEWAYS.slice(6),
     ];
 
-    const result = await Promise.any(allPromises);
-    clearTimeout(timer);
-    
-    // Once one succeeds, abort all others to save bandwidth
-    controller.abort();
-    
-    return result;
-  } catch (error) {
-    clearTimeout(timer);
-    console.error(`[IPFS] 🛑 All gateways failed for CID: ${cid}`);
-    return null;
-  }
+    try {
+      const allPromises = [
+        ...tiers[0].map(gw => attemptGateway(gw)),
+        ...tiers[1].map(gw => new Promise((res, rej) => {
+          setTimeout(() => attemptGateway(gw).then(res).catch(rej), 800);
+        })),
+        ...tiers[2].map(gw => new Promise((res, rej) => {
+          setTimeout(() => attemptGateway(gw).then(res).catch(rej), 2000);
+        })),
+      ];
+
+      const result = await Promise.any(allPromises);
+      clearTimeout(timer);
+      controller.abort();
+      return result;
+    } catch (error) {
+      clearTimeout(timer);
+      return null;
+    } finally {
+      inFlightRequests.delete(requestKey);
+    }
+  })();
+
+  inFlightRequests.set(requestKey, fetchPromise);
+  return fetchPromise;
 }
 
 

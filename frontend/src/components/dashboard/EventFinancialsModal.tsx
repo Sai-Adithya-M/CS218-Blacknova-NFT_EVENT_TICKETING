@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, TrendingUp, Wallet, Ticket, PieChart, Info, ArrowUpRight } from 'lucide-react';
-import { ethers } from 'ethers';
+import { X, TrendingUp, Ticket, PieChart, Info, ArrowUpRight } from 'lucide-react';
 import type { Event } from '../../store/useEventStore';
 import { config } from '../../config';
 
@@ -14,8 +13,9 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
   const [showFiat, setShowFiat] = useState(false);
   const ETH_PRICE = 3500; // Mock ETH price
 
-  // Defensive Calculations
-  const deploymentCostEth = parseFloat(ethers.formatEther(event.deploymentCost || "0"));
+  // On-Chain Data from EventStore
+  const totalRevenueEth = parseFloat(event.totalRevenue || "0");
+  const totalRoyaltyEth = parseFloat(event.totalRoyaltyEarned || "0");
   
   const tiers = Array.isArray(event.tiers) ? event.tiers : [];
   
@@ -24,9 +24,8 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
     revenue: (Number(tier.sold) || 0) * (Number(tier.price) || 0)
   }));
 
-  const totalRevenueEth = tierRevenue.reduce((acc, t) => acc + t.revenue, 0);
   const totalTicketsSold = tiers.reduce((acc, t) => acc + (Number(t.sold) || 0), 0);
-  const netProfitEth = totalRevenueEth - deploymentCostEth;
+  const netProfitEth = totalRevenueEth + totalRoyaltyEth; // Net earnings for organiser
 
   const formatValue = (ethValue: number) => {
     if (isNaN(ethValue)) return "0.00";
@@ -93,12 +92,12 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
 
             <div className="glass-panel bg-white/[0.03] border border-white/10 p-6 rounded-3xl relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                <Wallet size={48} />
+                <ShieldCheck className="w-12 h-12" />
               </div>
-              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Deployment Cost</p>
-              <h3 className="text-3xl font-black text-white italic">{formatValue(deploymentCostEth)}</h3>
+              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Royalty Earned</p>
+              <h3 className="text-3xl font-black text-white italic">{formatValue(totalRoyaltyEth)}</h3>
               <div className="mt-4 flex items-center gap-2">
-                <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-tighter">Gas: {parseInt(event.gasUsed || "0").toLocaleString()} units</span>
+                <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-tighter">From Secondary Resales</span>
               </div>
             </div>
 

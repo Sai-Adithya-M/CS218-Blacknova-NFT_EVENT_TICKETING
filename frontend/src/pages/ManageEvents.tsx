@@ -8,14 +8,13 @@ import { EventFinancialsModal } from '../components/dashboard/EventFinancialsMod
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ethers } from 'ethers';
-import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
 
 import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory ipfsHash, uint256 maxTickets, uint256 priceWei, uint96 royaltyBps) external",
-  "event EventCreated(uint indexed eventId, address indexed organiser, string ipfsHash)"
+  "function createEvent(string calldata ipfsHash, uint96 royaltyBps, string[] calldata tierNames, uint256[] calldata tierPrices, uint256[] calldata tierSupplies) external",
+  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash, uint8 numTiers)"
 ];
 
 interface TierFormData {
@@ -82,7 +81,9 @@ export const ManageEvents: React.FC = () => {
   };
 
   const addTier = () => {
-    setTiers([...tiers, { name: '', price: '', supply: '100' }]);
+    if (tiers.length < 3) {
+      setTiers([...tiers, { name: '', price: '', supply: '100' }]);
+    }
   };
 
   const removeTier = (index: number) => {
@@ -95,7 +96,7 @@ export const ManageEvents: React.FC = () => {
     e.preventDefault();
     if (!user) return;
 
-    const parsedTiers: TicketTier[] = tiers
+    const parsedTiers = tiers
       .filter(t => t.name && t.price && t.supply)
       .map((t, i) => ({
         id: `tier_${Date.now()}_${i}`,
@@ -110,9 +111,8 @@ export const ManageEvents: React.FC = () => {
     const eventDateObj = new Date(formData.date);
     const now = new Date();
 
-    // Compare dates by stripping seconds/milliseconds for a fairer comparison of "current" time
-    if (eventDateObj.getTime() < now.getTime() - 60000) { // Allow 1 minute grace period
-      setError("Event date cannot be in the past. Please select a future date.");
+    if (eventDateObj.getTime() < now.getTime() - 60000) {
+      setError("Event date cannot be in the past.");
       return;
     }
 
@@ -121,21 +121,11 @@ export const ManageEvents: React.FC = () => {
       return;
     }
 
-    if (parsedTiers.some(t => t.price <= 0)) {
-      setError("Ticket price must be greater than 0 ETH.");
-      return;
-    }
-
     setIsMining(true);
     try {
       if (!(window as any).ethereum) throw new Error("MetaMask not found");
 
-      const totalSupply = parsedTiers.reduce((acc, t) => acc + t.supply, 0);
-      const lowestPrice = Math.min(...parsedTiers.map(t => t.price));
-
       const provider = new ethers.BrowserProvider((window as any).ethereum);
-
-      // Network Check: Ensure user is on Sepolia
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(config.sepoliaChainId)) {
         try {
@@ -144,83 +134,39 @@ export const ManageEvents: React.FC = () => {
             params: [{ chainId: '0xaa36a7' }],
           });
         } catch (switchError) {
-          throw new Error("Please switch your MetaMask network to Sepolia to continue.");
+          throw new Error("Please switch to Sepolia.");
         }
       }
 
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
-      const basePriceWei = ethers.parseEther(lowestPrice.toString());
       const royaltyBps = Math.floor(parseFloat(formData.royalty || '0') * 100);
 
       let imageUrl = '';
       if (imageFile) {
-        try {
-          const imageHash = await uploadToIPFS(imageFile);
-          imageUrl = `ipfs://${imageHash}`;
-        } catch (err: any) {
-          throw new Error("Failed to upload image to IPFS: " + err.message);
-        }
+        const imageHash = await uploadToIPFS(imageFile);
+        imageUrl = `ipfs://${imageHash}`;
       }
 
       const metadataJSON = {
-        name: formData.title || 'Event',
-        location: formData.location || '',
-        date: formData.date || new Date().toISOString(),
-        description: formData.description || '',
-        category: formData.category || 'Music',
+        name: formData.title,
+        location: formData.location,
+        date: formData.date,
+        description: formData.description,
+        category: formData.category,
         image: imageUrl || undefined,
         tiers: parsedTiers
       };
 
-      // Upload to IPFS
-      let ipfsHash = "";
-      try {
-        ipfsHash = await uploadJSONToIPFS(metadataJSON);
-      } catch (err: any) {
-        throw new Error("Failed to upload metadata to IPFS: " + err.message);
-      }
-
-      const tx = await contract.createEvent(ipfsHash, totalSupply, basePriceWei, royaltyBps);
-      const receipt = await tx.wait();
-
-      let blockchainEventId = `evt_${Date.now()}`;
-      if (receipt && receipt.logs) {
-        try {
-          const eventCreatedLog = receipt.logs.find((log: any) => {
-            try {
-              const parsed = contract.interface.parseLog(log);
-              return parsed && parsed.name === 'EventCreated';
-            } catch { return false; }
-          });
-
-          if (eventCreatedLog) {
-            const parsedLog = contract.interface.parseLog(eventCreatedLog);
-            if (parsedLog && parsedLog.args && (parsedLog.args.eventId || parsedLog.args[0])) {
-              const id = (parsedLog.args.eventId || parsedLog.args[0]).toString();
-              blockchainEventId = `evt_${id}`;
-            }
-          }
-        } catch (err) {
-          console.warn("Failed to parse eventId from log", err);
-        }
-      }
+      const ipfsHash = await uploadJSONToIPFS(metadataJSON);
 
       const signerAddress = await signer.getAddress();
-      
-      // Calculate deployment cost
-      let deploymentCost = "0";
-      let gasUsedStr = "0";
-      if (receipt) {
-        const gasUsed = receipt.gasUsed;
-        const gasPrice = receipt.effectiveGasPrice || tx.gasPrice || 0n;
-        deploymentCost = (gasUsed * gasPrice).toString();
-        gasUsedStr = gasUsed.toString();
-      }
+      const tempId = `opt_${Date.now()}`;
 
+      // OPTIMISTIC UPDATE: Render immediately with local data
       createEvent({
-        id: blockchainEventId,
+        id: tempId,
         title: metadataJSON.name,
         description: metadataJSON.description,
         date: metadataJSON.date,
@@ -229,24 +175,31 @@ export const ManageEvents: React.FC = () => {
         organizerId: signerAddress,
         royaltyBps: royaltyBps,
         status: 'active',
-        deploymentCost,
-        gasUsed: gasUsedStr,
-        tiers: metadataJSON.tiers.map((t: any, idx: number) => ({
-          id: t.id || `tier_${blockchainEventId}_${idx}`,
-          name: t.name,
-          price: t.price,
-          supply: t.supply,
-          sold: 0
+        totalRevenue: "0",
+        totalRoyaltyEarned: "0",
+        isOptimistic: true,
+        imageUrl: imageUrl,
+        tiers: parsedTiers.map((t, idx) => ({
+          ...t,
+          id: `tier_${tempId}_${idx}`
         }))
       });
-      
-      // Redirect to Marketplace after success
+
+      // After optimistic update, navigate to the marketplace so user sees it instantly
       navigate('/events');
-      
-      setTiers([{ name: 'General', price: '', supply: '100' }]);
-      setImageFile(null);
-      setImagePreview(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // Prepare arrays for multi-tier creation
+      const tierNames = parsedTiers.map(t => t.name);
+      const tierPrices = parsedTiers.map(t => ethers.parseEther(t.price.toString()));
+      const tierSupplies = parsedTiers.map(t => BigInt(t.supply));
+
+      const tx = await contract.createEvent(ipfsHash, royaltyBps, tierNames, tierPrices, tierSupplies);
+      const receipt = await tx.wait();
+
+      if (receipt) {
+        // Success! The real event will eventually replace the optimistic one 
+        // during the next fetchEventsFromChain sync.
+      }
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
       setError(err.message || "Failed to create event.");
@@ -467,9 +420,14 @@ export const ManageEvents: React.FC = () => {
                     <button
                       type="button"
                       onClick={addTier}
-                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-all flex items-center gap-1.5"
+                      disabled={tiers.length >= 3}
+                      className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all flex items-center gap-1.5 ${
+                        tiers.length >= 3 
+                          ? 'bg-white/5 text-white/20 border-white/10 cursor-not-allowed' 
+                          : 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20'
+                      }`}
                     >
-                      <Plus size={10} /> Add Tier
+                      <Plus size={10} /> {tiers.length >= 3 ? 'Max Tiers Reached' : 'Add Tier'}
                     </button>
                   </div>
 

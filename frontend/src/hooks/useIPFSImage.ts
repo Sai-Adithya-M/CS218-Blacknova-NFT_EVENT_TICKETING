@@ -84,28 +84,16 @@ export function useIPFSImage(ipfsUrl?: string | null) {
 
     const cache = getCache();
     if (cache[cid]) {
-      console.log(`[useIPFSImage] Cache hit for CID: ${cid} -> ${cache[cid]}`);
-      // Optimistically set the cached URL
       setSrc(cache[cid]);
       setLoading(false);
-
-      // Verify cached URL still works (background check)
-      fetch(cache[cid], { method: 'HEAD', mode: 'no-cors' })
-        .catch(() => {
-          console.warn(`[useIPFSImage] Cached URL failed verification, re-discovering...`);
-          invalidateCache(cid);
-          // Don't update UI immediately, let discovery handle it if needed
-        });
       return;
     }
 
-    console.log(`[useIPFSImage] Discovering gateway for CID: ${cid}...`);
     setLoading(true);
 
     fetchFromIPFS(cid, { returnUrl: true, timeout: 15000 })
       .then(fastestUrl => {
         if (isMounted && fastestUrl) {
-          console.log(`[useIPFSImage] Successfully resolved CID: ${cid} to ${fastestUrl}`);
           setCache(cid, fastestUrl);
           setSrc(fastestUrl);
           setLoading(false);
