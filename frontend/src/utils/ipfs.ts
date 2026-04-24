@@ -11,10 +11,12 @@ const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
  */
 export const IPFS_GATEWAYS = [
   'https://gateway.pinata.cloud/ipfs',
+  'https://cloudflare-ipfs.com/ipfs',
   'https://ipfs.io/ipfs',
   'https://nftstorage.link/ipfs',
-  'https://cloudflare-ipfs.com/ipfs',
   'https://dweb.link/ipfs',
+  'https://w3s.link/ipfs',
+  'https://4everland.io/ipfs',
   'https://cf-ipfs.com/ipfs',
   'https://storry.tv/ipfs',
   'https://gateway.ipfs.io/ipfs',
@@ -50,58 +52,91 @@ export async function fetchFromIPFS(
   options: { json?: boolean, timeout?: number, returnUrl?: boolean } = {}
 ): Promise<any> {
   const cid = extractCid(cidOrUrl);
-  if (!cid) return null;
+  if (!cid) {
+    console.warn('[IPFS] No CID found in:', cidOrUrl);
+    return null;
+  }
 
-  const { json = true, timeout = 25000, returnUrl = false } = options;
+  const { json = true, timeout = 20000, returnUrl = false } = options;
+  console.log(`[IPFS] Starting fetch for CID: ${cid} (ReturnUrl: ${returnUrl})`);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = setTimeout(() => {
+    console.log(`[IPFS] Global timeout reached for CID: ${cid}`);
+    controller.abort();
+  }, timeout);
 
   const attemptGateway = async (baseUrl: string) => {
     const url = `${baseUrl}/${cid}`;
+    const start = Date.now();
+    
     try {
+      // For probing (returnUrl: true), we try a very lightweight check.
+      // We use GET with a short timeout and potentially a Range header.
       const response = await fetch(url, { 
         signal: controller.signal,
-        method: returnUrl ? 'HEAD' : 'GET' 
+        method: returnUrl ? 'GET' : 'GET', // Stick to GET for maximum compatibility
+        headers: returnUrl ? { 'Range': 'bytes=0-0' } : {}
       });
-      if (!response.ok) throw new Error('Gateway failed');
+
+      if (!response.ok) {
+        throw new Error(`Status ${response.status}`);
+      }
       
-      if (returnUrl) return url;
+      const duration = Date.now() - start;
+      console.log(`[IPFS] ✅ Gateway success: ${baseUrl} (${duration}ms)`);
+      
+      if (returnUrl) {
+        return url;
+      }
       
       const data = json ? await response.json() : response;
       return data;
-    } catch (e) {
-      if (returnUrl) {
-         // Some gateways don't support HEAD, fallback to GET for probing
-         try {
-           const retryRes = await fetch(url, { signal: controller.signal });
-           if (retryRes.ok) return url;
-         } catch(err) {}
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        // Silent failure for aborted requests
+      } else {
+        console.warn(`[IPFS] ❌ Gateway failed: ${baseUrl} (${e.message})`);
       }
       throw e;
     }
   };
 
 
-  // Staggered Tiers: Try fast ones immediately, then expand if they take too long
+  // Staggered Tiers: Try fast ones immediately, then expand
   const tiers = [
-    IPFS_GATEWAYS.slice(0, 3), // Aggressive first tier
-    IPFS_GATEWAYS.slice(3, 6),
-    IPFS_GATEWAYS.slice(6),
+    IPFS_GATEWAYS.slice(0, 4), // Aggressive first tier
+    IPFS_GATEWAYS.slice(4, 7),
+    IPFS_GATEWAYS.slice(7),
   ];
 
   try {
     const allPromises = [
       ...tiers[0].map(gw => attemptGateway(gw)),
-      ...tiers[1].map(gw => new Promise(r => setTimeout(r, 600)).then(() => attemptGateway(gw))),
-      ...tiers[2].map(gw => new Promise(r => setTimeout(r, 2500)).then(() => attemptGateway(gw))),
+      ...tiers[1].map(gw => new Promise((_, rej) => {
+        const t = setTimeout(() => {
+          attemptGateway(gw).then(_).catch(rej);
+        }, 500);
+        controller.signal.addEventListener('abort', () => clearTimeout(t));
+      })),
+      ...tiers[2].map(gw => new Promise((_, rej) => {
+        const t = setTimeout(() => {
+          attemptGateway(gw).then(_).catch(rej);
+        }, 1500);
+        controller.signal.addEventListener('abort', () => clearTimeout(t));
+      })),
     ];
 
     const result = await Promise.any(allPromises);
     clearTimeout(timer);
+    
+    // Once one succeeds, abort all others to save bandwidth
+    controller.abort();
+    
     return result;
   } catch (error) {
     clearTimeout(timer);
+    console.error(`[IPFS] 🛑 All gateways failed for CID: ${cid}`);
     return null;
   }
 }
