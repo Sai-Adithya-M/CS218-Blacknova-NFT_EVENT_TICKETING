@@ -7,42 +7,110 @@ const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
 
 /**
  * Ordered list of public IPFS gateways.
- * We prioritize dweb.link and cloudflare as they are generally more reliable for browsers.
+ * We include multiple gateways to ensure high availability and speed.
  */
 export const IPFS_GATEWAYS = [
   'https://gateway.pinata.cloud/ipfs',
+  'https://ipfs.io/ipfs',
+  'https://nftstorage.link/ipfs',
   'https://cloudflare-ipfs.com/ipfs',
   'https://dweb.link/ipfs',
-  'https://ipfs.io/ipfs',
+  'https://cf-ipfs.com/ipfs',
+  'https://storry.tv/ipfs',
+  'https://gateway.ipfs.io/ipfs',
 ];
 
 export const FALLBACK_IMG = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80';
 
 /**
  * Robustly extract a CID from various formats:
- * - Full gateway URL: https://cloudflare-ipfs.com/ipfs/Qm...
- * - Protocol URL: ipfs://Qm...
- * - Raw CID: Qm...
  */
 export function extractCid(url?: string): string | null {
   if (!url) return null;
   
-  // Case 1: CID is part of a URL path (e.g., /ipfs/Qm...)
   const pathMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/);
   if (pathMatch) return pathMatch[1];
 
-  // Case 2: protocol format (ipfs://Qm...)
   if (url.startsWith('ipfs://')) return url.replace('ipfs://', '').trim();
 
-  // Case 3: Raw CID (starts with Qm or ba)
-  if (url.startsWith('Qm') || url.startsWith('ba')) return url.trim();
+  const trimmed = url.trim();
+  if (trimmed.startsWith('Qm') || trimmed.startsWith('ba') || (trimmed.startsWith('b') && trimmed.length > 30)) {
+    return trimmed;
+  }
 
   return null;
 }
 
 /**
+ * Races multiple gateways to fetch content from IPFS.
+ * Uses a staggered approach to avoid unnecessary network load while ensuring speed.
+ */
+export async function fetchFromIPFS(
+  cidOrUrl: string, 
+  options: { json?: boolean, timeout?: number, returnUrl?: boolean } = {}
+): Promise<any> {
+  const cid = extractCid(cidOrUrl);
+  if (!cid) return null;
+
+  const { json = true, timeout = 25000, returnUrl = false } = options;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  const attemptGateway = async (baseUrl: string) => {
+    const url = `${baseUrl}/${cid}`;
+    try {
+      const response = await fetch(url, { 
+        signal: controller.signal,
+        method: returnUrl ? 'HEAD' : 'GET' 
+      });
+      if (!response.ok) throw new Error('Gateway failed');
+      
+      if (returnUrl) return url;
+      
+      const data = json ? await response.json() : response;
+      return data;
+    } catch (e) {
+      if (returnUrl) {
+         // Some gateways don't support HEAD, fallback to GET for probing
+         try {
+           const retryRes = await fetch(url, { signal: controller.signal });
+           if (retryRes.ok) return url;
+         } catch(err) {}
+      }
+      throw e;
+    }
+  };
+
+
+  // Staggered Tiers: Try fast ones immediately, then expand if they take too long
+  const tiers = [
+    IPFS_GATEWAYS.slice(0, 3), // Aggressive first tier
+    IPFS_GATEWAYS.slice(3, 6),
+    IPFS_GATEWAYS.slice(6),
+  ];
+
+  try {
+    const allPromises = [
+      ...tiers[0].map(gw => attemptGateway(gw)),
+      ...tiers[1].map(gw => new Promise(r => setTimeout(r, 600)).then(() => attemptGateway(gw))),
+      ...tiers[2].map(gw => new Promise(r => setTimeout(r, 2500)).then(() => attemptGateway(gw))),
+    ];
+
+    const result = await Promise.any(allPromises);
+    clearTimeout(timer);
+    return result;
+  } catch (error) {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+
+
+
+/**
  * Upload a file to IPFS using Pinata's pinning API.
- * Returns the IPFS CID (Content Identifier) string.
  */
 export async function uploadToIPFS(file: File): Promise<string> {
   if (!PINATA_JWT) {
@@ -77,7 +145,6 @@ export async function uploadToIPFS(file: File): Promise<string> {
 
 /**
  * Upload JSON metadata to IPFS using Pinata.
- * Returns the IPFS CID string.
  */
 export async function uploadJSONToIPFS(jsonData: any): Promise<string> {
   if (!PINATA_JWT) {
@@ -113,6 +180,7 @@ export async function uploadJSONToIPFS(jsonData: any): Promise<string> {
 export function ipfsToHttpUrl(cidOrUrl: string): string {
   if (!cidOrUrl) return '';
   const cid = extractCid(cidOrUrl);
-  if (!cid) return cidOrUrl; // Return as-is if it's already a URL or we can't parse it
+  if (!cid) return cidOrUrl;
   return `${IPFS_GATEWAYS[0]}/${cid}`;
 }
+

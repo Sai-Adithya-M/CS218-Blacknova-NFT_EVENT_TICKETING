@@ -34,6 +34,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint256 => ResaleListing) public resaleListings;
 
     event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash);
+    event EventUpdated(uint256 indexed eventId, string newIpfsHash);
     event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier);
     event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei);
     event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei);
@@ -60,6 +61,21 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
         emit EventCreated(nextEventId, msg.sender, ipfsHash);
         unchecked { nextEventId++; }
+    }
+
+    function editEvent(uint256 eventId, string memory newIpfsHash, uint256 newMaxTickets, uint256 newPriceWei) external {
+        Event storage evt = events[eventId];
+        require(evt.exists, "Event does not exist");
+        require(msg.sender == evt.organiser, "Not the organiser");
+        require(newMaxTickets >= evt.ticketsSold, "Cannot reduce max below sold");
+        require(bytes(newIpfsHash).length > 0, "IPFS hash cannot be empty");
+        require(newPriceWei > 0, "Price must be > 0");
+
+        evt.maxTickets = newMaxTickets;
+        evt.priceWei = newPriceWei;
+        evt.ipfsHash = newIpfsHash;
+
+        emit EventUpdated(eventId, newIpfsHash);
     }
 
     function buyTicket(uint256 eventId, uint256 quantity, uint8 tier) external payable nonReentrant {
