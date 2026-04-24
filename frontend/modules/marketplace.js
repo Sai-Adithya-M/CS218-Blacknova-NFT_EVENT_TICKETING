@@ -23,24 +23,14 @@ export async function fetchData() {
         
         console.log(`Listing #${i}:`, listing);
 
-        // Handle bytes16 name (convert hex to string)
-        let name = evt.name;
-        if (typeof name === 'string' && name.startsWith('0x')) {
-          try {
-             // Basic hex to utf8 conversion for bytes16
-             const bytes = ethers.toBeArray(name);
-             name = new TextDecoder().decode(bytes).replace(/\0/g, '');
-          } catch (e) {
-            console.warn('Failed to decode name:', name);
-          }
-        }
+        const eventName = evt.ipfsHash || `Event #${Number(eventId)}`;
 
         listings.push({
           tokenId: i,
           seller: listing.seller,
           priceWei: listing.priceWei ? listing.priceWei.toString() : "0",
           originalPriceWei: evt.priceWei ? evt.priceWei.toString() : "0",
-          eventName: name,
+          eventName: eventName,
           eventId: Number(eventId),
         });
       }

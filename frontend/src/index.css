@@ -16,11 +16,12 @@
   --border-light: rgba(255, 255, 255, 0.08);
   --border-focus: rgba(170, 59, 255, 0.4);
   
-  --accent-primary: #8C3BFE;
-  --accent-purple: #8C3BFE;
+  --accent-primary: #3B82F6;
+  --accent-purple: #3B82F6;
   --accent-teal: #10B981;
-  --accent-hover: #AA3BFF;
-  --accent-glow: rgba(140, 59, 254, 0.4);
+  --accent-hover: #60A5FA;
+  --accent-glow: rgba(59, 130, 246, 0.4);
+
   
   --status-active: #10B981;
   --status-expired: #EF4444;
@@ -93,11 +94,12 @@ h1, h2, h3, h4 {
 }
 
 .text-accent {
-  background: linear-gradient(135deg, #C084FC 0%, #8C3BFE 100%);
+  background: linear-gradient(135deg, #60A5FA 0%, #3B82F6 100%);
     background-clip: text;              /* ✅ add this */
    -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+
 
 /* Base button styles */
 .btn {

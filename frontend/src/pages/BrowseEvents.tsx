@@ -21,7 +21,10 @@ export const BrowseEvents: React.FC = () => {
   const filteredEvents = useMemo(() => {
     return events.filter(event => {
       // Basic status and expiration filter
-      const isActive = event.status === 'active' && new Date(event.date) > new Date();
+      const eventDate = new Date(event.date);
+      const isExpired = !isNaN(eventDate.getTime()) && eventDate < new Date();
+      const isActive = event.status === 'active' && !isExpired;
+      
       if (!isActive) return false;
 
       // Search filter (title, location, description)

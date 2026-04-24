@@ -69,11 +69,11 @@ export const Navbar: React.FC = () => {
       <div className="px-8 flex justify-between items-center gap-8">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2.5 group shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-            <Sparkles className="text-white" size={17} />
+          <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform bg-white/5 border border-white/10">
+            <img src="/logo.svg" alt="Nexting Logo" className="w-full h-full object-cover" />
           </div>
           <span className="text-lg font-black tracking-tight uppercase italic">
-            NIF<span className="text-[var(--accent-teal)]">TING</span>
+            NET<span className="text-[var(--accent-teal)]">IX</span>
           </span>
         </Link>
 
@@ -133,8 +133,8 @@ export const Navbar: React.FC = () => {
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all font-sans"
               >
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center text-xs font-black">
-                  {user?.name?.[0]?.toUpperCase() || 'U'}
+                <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-white/80">
+                  <User size={14} />
                 </div>
                 <div className="text-left hidden xl:block">
                   <p className="text-[11px] font-black text-white leading-none">{user?.name}</p>
