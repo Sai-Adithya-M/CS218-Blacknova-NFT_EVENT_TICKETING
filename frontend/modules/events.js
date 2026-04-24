@@ -9,12 +9,13 @@ import { showToast, showLoading, hideLoading } from '../main.js';
  */
 export async function createEvent(name, maxTickets, priceEth, royaltyPercent) {
   const contract = await getContract();
-  const priceWei = ethers.parseEther(priceEth);
+  // Contract stores price in gwei (uint40), so convert ETH -> gwei
+  const priceGwei = ethers.parseUnits(priceEth, 'gwei');
   const royaltyBps = Math.round(royaltyPercent);
 
   showLoading('Creating event on blockchain...');
   try {
-    const tx = await contract.createEvent(name, maxTickets, priceWei, royaltyBps);
+    const tx = await contract.createEvent(name, maxTickets, priceGwei, royaltyBps);
     showLoading('Waiting for confirmation...');
     await tx.wait();
     showToast('Event created successfully!', 'success');
@@ -67,7 +68,8 @@ export async function buyTicket(eventId, priceWei, quantity = 1, tier = 0) {
 
   showLoading('Purchasing ticket...');
   try {
-    const totalValue = BigInt(priceWei) * BigInt(quantity);
+    // priceWei from contract is actually in gwei; multiply by 1e9 to get real wei
+    const totalValue = BigInt(priceWei) * BigInt(1e9) * BigInt(quantity);
     const tx = await contract.buyTicket(eventId, quantity, tier, { value: totalValue });
     showLoading('Waiting for confirmation...');
     await tx.wait();
@@ -100,7 +102,8 @@ export function renderEvents(events, container) {
   }
 
   events.forEach((evt) => {
-    const priceEth = ethers.formatEther(evt.priceWei);
+    // Contract stores price in gwei, so convert gwei -> ETH for display
+    const priceEth = ethers.formatEther(BigInt(evt.priceWei) * BigInt(1e9));
     const soldOut = evt.ticketsSold >= evt.maxTickets;
     const progress = (evt.ticketsSold / evt.maxTickets) * 100;
     const account = getCurrentAccount();

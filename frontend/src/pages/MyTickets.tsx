@@ -38,8 +38,8 @@ const BannerImage: React.FC<{ src?: string; alt: string; className?: string }> =
 };
 
 const CONTRACT_ABI = [
-  "function listForResale(uint tokenId, uint priceWei) public",
-  "function cancelResaleListing(uint tokenId) public"
+  "function listForResale(uint256 tokenId, uint48 priceWei) external",
+  "function cancelResaleListing(uint256 tokenId) external"
 ];
 
 export const MyTickets: React.FC = () => {
@@ -71,7 +71,8 @@ export const MyTickets: React.FC = () => {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
-      const priceWei = ethers.parseEther(price.toString());
+      // Contract stores resale price in gwei (uint48 max ~281,474 ETH)
+      const priceWei = ethers.parseUnits(price.toString(), "gwei");
       const tx = await contract.listForResale(ticket.tokenId, priceWei);
       await tx.wait();
       listTicketForResale(ticket.id, price);

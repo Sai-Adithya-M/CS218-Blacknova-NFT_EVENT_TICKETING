@@ -6,11 +6,19 @@ import { fetchFromIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
-  "function tokenToEvent(uint256 tokenId) public view returns (uint)",
+  "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
-  "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
-  "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
-  "function nextTokenId() public view returns (uint256)"
+  // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
+  "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
+  "function getResaleListing(uint256 tokenId) public view returns (tuple(address seller, uint48 priceWei, bool active))",
+  "function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48)",
+  "function nextTokenId() public view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+  "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
+  "event TicketListed(uint256 indexed tokenId, address indexed seller, uint48 priceWei)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei)",
+  "event ListingCancelled(uint256 indexed tokenId)",
+  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
 // Fallback map if metadata is unreachable
@@ -96,95 +104,125 @@ export const useTicketStore = create<TicketState>((set) => ({
 
     set({ isLoading: true });
     try {
-      console.log("Fetching tickets directly from on-chain state...");
+      console.log("Bulletproof Sync: Fetching tickets directly from contract state...");
       const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
+      
+      const fromBlock = config.deploymentBlock || 5700000;
+      
+      const [
+        transferLogs,
+        mintedLogs,
+        listedLogs,
+        resoldLogs,
+        cancelledLogs,
+        createdLogs   // for ipfsHash lookup
+      ] = await Promise.all([
+        contract.queryFilter(contract.filters.Transfer(), fromBlock).catch(() => contract.queryFilter(contract.filters.Transfer(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.TicketMinted(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketMinted(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.TicketListed(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketListed(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.TicketResold(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketResold(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.ListingCancelled(), fromBlock).catch(() => contract.queryFilter(contract.filters.ListingCancelled(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.EventCreated(), fromBlock).catch(() => contract.queryFilter(contract.filters.EventCreated(), -10000).catch(() => []))
+      ]);
 
-      // 1) Get the total number of minted tokens
-      const nextTokenId = Number(await contract.nextTokenId());
-      console.log("Total tokens minted:", nextTokenId - 1);
+      const owners: Record<string, string> = {};
+      const tokenEvents: Record<string, string> = {};
+      const tokenTiers: Record<string, number> = {};
+      const listings: Record<string, { priceWei: bigint, active: boolean }> = {};
 
-      if (nextTokenId <= 1) {
-        set({ tickets: [], isLoading: false });
-        return;
-      }
+      transferLogs.forEach((log: any) => {
+        if (log.args) owners[log.args.tokenId.toString()] = log.args.to.toLowerCase();
+      });
 
+      mintedLogs.forEach((log: any) => {
+        if (log.args) {
+          const tId = log.args.tokenId.toString();
+          tokenEvents[tId] = log.args.eventId.toString();
+          tokenTiers[tId] = Number(log.args.tier);
+        }
+      });
+
+      listedLogs.forEach((log: any) => {
+        if (log.args) {
+          listings[log.args.tokenId.toString()] = { priceWei: log.args.priceWei, active: true };
+        }
+      });
+
+      resoldLogs.forEach((log: any) => {
+        if (log.args) {
+          const tId = log.args.tokenId.toString();
+          if (listings[tId]) listings[tId].active = false;
+        }
+      });
+
+      cancelledLogs.forEach((log: any) => {
+        if (log.args) {
+          const tId = log.args.tokenId.toString();
+          if (listings[tId]) listings[tId].active = false;
+        }
+      });
+
+      // ipfsHash lives only in EventCreated logs, not in the struct
+      const ipfsHashByEvent: Record<string, string> = {};
+      (createdLogs as any[]).forEach((log: any) => {
+        if (log.args?.ipfsHash) {
+          ipfsHashByEvent[log.args.eventId.toString()] = log.args.ipfsHash;
+        }
+      });
+
+      const relevantTokens: string[] = [];
       const userLower = userAddress?.toLowerCase() || "";
+      
+      Object.keys(owners).forEach(tId => {
+        const isOwned = userLower && owners[tId] === userLower;
+        const isActiveListing = listings[tId]?.active;
+        if (isOwned || isActiveListing) {
+          relevantTokens.push(tId);
+        }
+      });
 
-      // 2) For every minted token, read on-chain state directly
-      //    This is the reliable way — no event log range issues
-      const tokenData: {
-        tokenId: string;
-        owner: string;
-        eventId: string;
-        tier: number;
-        listing: { seller: string; priceWei: bigint; active: boolean };
-      }[] = [];
-
-      await Promise.all(
-        Array.from({ length: nextTokenId - 1 }, (_, i) => i + 1).map(async (tid) => {
-          const tId = tid.toString();
-          try {
-            const [owner, eventId, tier, listing] = await Promise.all([
-              contract.ownerOf(tId),
-              contract.tokenToEvent(tId),
-              contract.tokenToTier(tId),
-              contract.getResaleListing(tId),
-            ]);
-
-            const ownerLower = owner.toLowerCase();
-            const isOwned = userLower && ownerLower === userLower;
-            const isActiveListing = listing.active;
-
-            // Only include tokens the user owns OR that are actively listed
-            if (isOwned || isActiveListing) {
-              tokenData.push({
-                tokenId: tId,
-                owner: ownerLower,
-                eventId: eventId.toString(),
-                tier: Number(tier),
-                listing: {
-                  seller: listing.seller,
-                  priceWei: listing.priceWei,
-                  active: listing.active,
-                },
-              });
-            }
-          } catch (e) {
-            // Token may have been burned or doesn't exist; skip
-          }
-        })
-      );
-
-      // 3) Fetch event metadata for all relevant tokens (deduplicated)
-      const uniqueEvents = [...new Set(tokenData.map((t) => t.eventId))];
+      const uniqueEvents = [...new Set(relevantTokens.map(tId => tokenEvents[tId]))];
       const eventDataCache: Record<string, any> = {};
 
+      await Promise.all(uniqueEvents.map(async (eventIdNum) => {
+        if (!eventIdNum) return;
+        try {
+          const evtData = await contract.fetchEventData(eventIdNum);
+          const hash = ipfsHashByEvent[eventIdNum]; // from EventCreated log
+          eventDataCache[eventIdNum] = {
+            data: evtData,
+            metadata: hash ? await fetchFromIPFS(hash).catch(() => null) : null
+          };
+        } catch (e) {}
+      }));
+
+      // Fetch actual purchase prices from chain for all relevant tokens
+      const purchasePrices: Record<string, number> = {};
       await Promise.all(
-        uniqueEvents.map(async (eventIdNum) => {
-          if (!eventIdNum) return;
+        relevantTokens.map(async (tId) => {
           try {
-            const evtData = await contract.fetchEventData(eventIdNum);
-            const hash = evtData.ipfsHash || evtData[6];
-            eventDataCache[eventIdNum] = {
-              data: evtData,
-              metadata: hash ? await fetchFromIPFS(hash).catch(() => null) : null,
-            };
-          } catch (e) {}
+            const priceGwei = await contract.getTokenPurchasePrice(tId);
+            const priceEth = parseFloat(ethers.formatUnits(priceGwei, "gwei"));
+            if (priceEth > 0) {
+              purchasePrices[tId] = priceEth;
+            }
+          } catch {}
         })
       );
 
-      // 4) Build the ticket objects
       const loadedTickets: Ticket[] = [];
 
-      tokenData.forEach(({ tokenId, owner, eventId, tier, listing }) => {
-        if (!eventDataCache[eventId]) return;
-
-        const { data: evt, metadata } = eventDataCache[eventId];
-        const tierIndex = tier;
-
+      relevantTokens.forEach(tId => {
+        const eventIdNum = tokenEvents[tId];
+        if (!eventIdNum || !eventDataCache[eventIdNum]) return;
+        
+        const { data: evt, metadata } = eventDataCache[eventIdNum];
+        const tierIndex = tokenTiers[tId] || 0;
+        
         let tierName = TIER_MAP[tierIndex] || 'General';
-        let basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
+        // Fallback: base event price in gwei → ETH
+        let basePrice = parseFloat(ethers.formatUnits(evt.priceWei || evt[1], "gwei"));
 
         if (metadata?.tiers?.[tierIndex]) {
           tierName = metadata.tiers[tierIndex].name;
@@ -193,22 +231,25 @@ export const useTicketStore = create<TicketState>((set) => ({
           }
         }
 
-        const isActiveListing = listing.active;
-        const resalePrice = isActiveListing
-          ? parseFloat(ethers.formatEther(listing.priceWei))
-          : undefined;
+        // Use on-chain purchase price (actual price paid) if available
+        const actualPrice = purchasePrices[tId] ?? basePrice;
+
+        const isActiveListing = listings[tId]?.active;
+        const resalePriceWei = listings[tId]?.priceWei;
+        // TicketListed emits priceWei in gwei (uint48); convert to ETH for UI
+        const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatUnits(resalePriceWei, "gwei")) : undefined;
 
         loadedTickets.push({
-          id: `tkt_${tokenId}`,
-          tokenId,
-          txHash: '',
-          eventId: `evt_${eventId}`,
-          ownerId: owner,
-          tierName,
-          tierPrice: basePrice,
+          id: `tkt_${tId}`,
+          tokenId: tId,
+          txHash: '', 
+          eventId: `evt_${eventIdNum}`,
+          ownerId: owners[tId],
+          tierName: tierName,
+          tierPrice: actualPrice,
           status: isActiveListing ? 'resale' : 'active',
-          purchasedAt: new Date().toISOString(),
-          resalePrice,
+          purchasedAt: new Date().toISOString(), 
+          resalePrice: resalePrice,
         });
       });
 
