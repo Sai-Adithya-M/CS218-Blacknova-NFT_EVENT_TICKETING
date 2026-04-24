@@ -7,7 +7,7 @@
 ---
 
 ##  Project Team: Blacknova
-| Name | Roll Number | Role |
+| Name | Roll Number | 
 | :--- | :--- | :--- |
 | **Kadasani Aswartha Karthik Reddy** | 240001036 | 
 | **Mannepalli Sai Adithya** | 240001044 | 
