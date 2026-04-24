@@ -13,18 +13,16 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     enum Tier { Silver, Gold, VIP }
 
     struct Event {
-        uint256 maxTickets;
-        uint256 priceWei;
-        uint256 ticketsSold;
-        address organiser;
-        uint96 royaltyBps; // e.g., 500 = 5%
-        bool exists;
-        string ipfsHash;
+        address organiser;   
+        uint40 priceWei;     
+        uint24 maxTickets;   
+        uint24 ticketsSold;  
+        uint8  royaltyBps;
     }
 
     struct ResaleListing {
         address seller;
-        uint256 priceWei;
+        uint48 priceWei;
         bool active;
     }
 
@@ -34,57 +32,53 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     mapping(uint256 => ResaleListing) public resaleListings;
 
     event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash);
-    event EventUpdated(uint256 indexed eventId, string newIpfsHash);
+    event EventUpdated(uint256 indexed eventId, uint24 newMaxTickets, uint40 newPriceWei);
     event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier);
-    event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei);
-    event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei);
+    event TicketListed(uint256 indexed tokenId, address indexed seller, uint48 priceWei);
+    event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei);
     event ListingCancelled(uint256 indexed tokenId);
 
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(string memory ipfsHash, uint256 maxTickets, uint256 priceWei, uint96 royaltyBps) external {
+    function createEvent(string memory ipfsHash, uint24 maxTickets, uint40 priceWei, uint8 royaltyBps) external {
         require(maxTickets > 0, "Must have tickets");
         require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
         require(priceWei > 0, "Price must be greater than zero");
-        require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
+        require(royaltyBps <= 100, "Royalty cannot exceed 100%");
 
-        events[nextEventId] = Event({
-            maxTickets: maxTickets,
-            priceWei: priceWei,
+        uint256 eventId = nextEventId;
+        events[eventId] = Event({
+            organiser:   msg.sender,
+            priceWei:    priceWei,
+            maxTickets:  maxTickets,
             ticketsSold: 0,
-            organiser: msg.sender,
-            royaltyBps: royaltyBps,
-            exists: true,
-            ipfsHash: ipfsHash
+            royaltyBps:  royaltyBps
         });
-
-        emit EventCreated(nextEventId, msg.sender, ipfsHash);
         unchecked { nextEventId++; }
+        emit EventCreated(eventId, msg.sender, ipfsHash);
     }
 
-    function editEvent(uint256 eventId, string memory newIpfsHash, uint256 newMaxTickets, uint256 newPriceWei) external {
+    function editEvent(uint256 eventId, uint24 newMaxTickets, uint40 newPriceWei) external {
         Event storage evt = events[eventId];
-        require(evt.exists, "Event does not exist");
+        require(evt.organiser != address(0), "Event does not exist");
         require(msg.sender == evt.organiser, "Not the organiser");
         require(newMaxTickets >= evt.ticketsSold, "Cannot reduce max below sold");
-        require(bytes(newIpfsHash).length > 0, "IPFS hash cannot be empty");
         require(newPriceWei > 0, "Price must be > 0");
 
         evt.maxTickets = newMaxTickets;
         evt.priceWei = newPriceWei;
-        evt.ipfsHash = newIpfsHash;
-
-        emit EventUpdated(eventId, newIpfsHash);
+        emit EventUpdated(eventId, newMaxTickets, newPriceWei);
     }
 
-    function buyTicket(uint256 eventId, uint256 quantity, uint8 tier) external payable nonReentrant {
+    function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) external payable nonReentrant {
         require(quantity > 0, "Quantity must be > 0");
         Event storage evt = events[eventId];
-        require(evt.exists, "Event does not exist");
+        require(evt.organiser != address(0), "Event does not exist");
         require(evt.ticketsSold + quantity <= evt.maxTickets, "Not enough tickets available");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
-        require(msg.value >= evt.priceWei * quantity, "Incorrect ETH amount");
+        // priceWei is stored in gwei; multiply by 1e9 to get wei
+        require(msg.value >= uint256(evt.priceWei) * 1e9 * quantity, "Incorrect ETH amount");
         
         for (uint256 i = 0; i < quantity; ) {
             uint256 tokenId = nextTokenId;
@@ -106,13 +100,13 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(success, "Transfer failed");
     }
 
-    function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint256[] memory quantities) external payable nonReentrant {
+    function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) external payable nonReentrant {
         require(tiers.length == quantities.length, "Mismatched input arrays");
         Event storage evt = events[eventId];
-        require(evt.exists, "Event does not exist");
+        require(evt.organiser != address(0), "Event does not exist");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
 
-        uint256 totalQuantity = 0;
+        uint24 totalQuantity = 0;
         for (uint256 i = 0; i < quantities.length; ) {
             totalQuantity += quantities[i];
             unchecked { i++; }
@@ -120,10 +114,11 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
         require(totalQuantity > 0, "Quantity must be > 0");
         require(evt.ticketsSold + totalQuantity <= evt.maxTickets, "Not enough tickets available");
-        require(msg.value >= evt.priceWei * totalQuantity, "Incorrect ETH amount");
+        // priceWei is stored in gwei; multiply by 1e9 to get wei
+        require(msg.value >= uint256(evt.priceWei) * 1e9 * totalQuantity, "Incorrect ETH amount");
 
         for (uint256 t = 0; t < tiers.length; ) {
-            uint256 qty = quantities[t];
+            uint24 qty = quantities[t];
             uint8 tier = tiers[t];
             
             for (uint256 i = 0; i < qty; ) {
@@ -149,7 +144,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     // --- Marketplace Functions ---
-    function listForResale(uint256 tokenId, uint256 priceWei) external {
+    function listForResale(uint256 tokenId, uint48 priceWei) external {
         require(ownerOf(tokenId) == msg.sender, "Not the owner");
         require(priceWei > 0, "Price must be > 0");
 
@@ -167,17 +162,18 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(listing.active, "Not for sale");
         
         uint256 eventId = tokenToEvent[tokenId];
-        require(msg.sender != events[eventId].organiser, "Organiser cannot buy their own tickets");
+        Event storage evtResale = events[eventId];
+        require(evtResale.organiser != address(0), "Event does not exist");
+        require(msg.sender != evtResale.organiser, "Organiser cannot buy their own tickets");
 
-        require(msg.value == listing.priceWei, "Incorrect ETH amount");
+        // listingPrice is stored in gwei; multiply by 1e9 to compare against msg.value (wei)
+        require(msg.value == uint256(listing.priceWei) * 1e9, "Incorrect ETH amount");
         require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
 
         (address organiser, uint256 royaltyAmount) = royaltyInfo(tokenId, msg.value);
         uint256 sellerProceeds = msg.value - royaltyAmount;
 
-        delete resaleListings[tokenId]; // Prevent reentrancy
-
-        _transfer(listing.seller, msg.sender, tokenId);
+        resaleListings[tokenId].active = false;
 
         if (royaltyAmount > 0) {
             (bool successRoyalty, ) = payable(organiser).call{value: royaltyAmount}("");
@@ -187,7 +183,9 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         (bool successSeller, ) = payable(listing.seller).call{value: sellerProceeds}("");
         require(successSeller, "Seller transfer failed");
 
-        emit TicketResold(tokenId, listing.seller, msg.sender, msg.value);
+        _transfer(listing.seller, msg.sender, tokenId);
+
+        emit TicketResold(tokenId, listing.seller, msg.sender, listing.priceWei);
     }
 
     function cancelResaleListing(uint256 tokenId) external {
@@ -212,7 +210,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
         uint256 eventId = tokenToEvent[tokenId];
         Event memory evt = events[eventId];
-        uint256 amount = (salePrice * uint256(evt.royaltyBps)) / 10000;
+        uint256 amount = (salePrice * uint256(evt.royaltyBps)) / 100;
         return (evt.organiser, amount);
     }
 
