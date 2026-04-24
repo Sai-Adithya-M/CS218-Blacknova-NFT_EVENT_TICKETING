@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Loader2, AlertCircle, Info } from 'lucide-react';
+import { X, Loader2, AlertCircle, Info, Layers } from 'lucide-react';
 import { ethers } from 'ethers';
 import { config } from '../../config';
 import { useEventStore, type Event } from '../../store/useEventStore';
@@ -21,16 +21,35 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Per-tier state (supply + price for each tier)
+  const [tierSupplies, setTierSupplies] = useState<number[]>(
+    event.tiers.map(t => t.supply)
+  );
+  const [tierPrices, setTierPrices] = useState<number[]>(
+    event.tiers.map(t => t.price)
+  );
+
   const totalSold = event.tiers.reduce((sum, t) => sum + t.sold, 0);
-  const totalSupply = event.tiers.reduce((sum, t) => sum + t.supply, 0);
-  const currentPriceEth = event.tiers.length > 0
-    ? Math.min(...event.tiers.map(t => t.price))
-    : 0;
+  const newTotalSupply = tierSupplies.reduce((sum, s) => sum + s, 0);
+  const lowestPrice = tierPrices.length > 0 ? Math.min(...tierPrices) : 0;
 
-  const [maxTickets, setMaxTickets] = useState(totalSupply);
-  const [priceEth, setPriceEth] = useState(currentPriceEth);
+  // Validation: each tier supply must be >= its sold count, price must be > 0
+  const tierSupplyErrors = event.tiers.map((t, i) =>
+    tierSupplies[i] < t.sold ? `Must be ≥ ${t.sold} (already sold)` : null
+  );
+  const tierPriceErrors = tierPrices.map(p =>
+    p <= 0 ? 'Must be > 0' : null
+  );
+  const hasErrors = tierSupplyErrors.some(e => e !== null) || tierPriceErrors.some(e => e !== null);
+  const isValid = !hasErrors && newTotalSupply > 0;
 
-  const isValid = maxTickets >= totalSold && priceEth > 0;
+  const updateTierSupply = (index: number, value: number) => {
+    setTierSupplies(prev => prev.map((s, i) => i === index ? value : s));
+  };
+
+  const updateTierPrice = (index: number, value: number) => {
+    setTierPrices(prev => prev.map((p, i) => i === index ? value : p));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,31 +65,30 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
         throw new Error("Please switch your MetaMask network to Sepolia.");
       }
 
-      if (maxTickets < totalSold) {
-        throw new Error(`Max tickets cannot be less than tickets already sold (${totalSold}).`);
+      if (newTotalSupply < totalSold) {
+        throw new Error(`Total supply cannot be less than tickets already sold (${totalSold}).`);
       }
-      if (priceEth <= 0) throw new Error("Price must be greater than 0.");
+      if (lowestPrice <= 0) throw new Error("All tier prices must be greater than 0.");
 
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const numericEventId = event.id.replace('evt_', '');
-      // Contract stores price in gwei (uint40), not wei
-      const newPriceWei = ethers.parseUnits(priceEth.toString(), "gwei");
+      // Contract stores lowest tier price in gwei (uint40) — same as creation logic
+      const newPriceWei = ethers.parseUnits(lowestPrice.toString(), "gwei");
 
       const tx = await contract.editEvent(
         numericEventId,
-        maxTickets,      // uint24
-        newPriceWei      // uint40 (as BigInt from parseEther)
+        newTotalSupply,  // uint24 — sum of all tier supplies
+        newPriceWei      // uint40 — lowest tier price
       );
       await tx.wait();
 
-      // Update local store — scale tier supplies proportionally, update price
-      const scaleFactor = totalSupply > 0 ? maxTickets / totalSupply : 1;
-      const updatedTiers = event.tiers.map(t => ({
+      // Update local store with per-tier supply + price changes
+      const updatedTiers = event.tiers.map((t, i) => ({
         ...t,
-        price: priceEth,
-        supply: Math.max(t.sold, Math.round(t.supply * scaleFactor))
+        price: tierPrices[i],
+        supply: tierSupplies[i]
       }));
 
       editEventLocally(event.id, { tiers: updatedTiers });
@@ -111,7 +129,7 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
               <Info size={14} className="text-[var(--accent-teal)] mt-0.5 shrink-0" />
               <p className="text-[10px] font-bold text-white/50 leading-relaxed">
                 Event name, image and metadata are permanently stored on IPFS and cannot be changed.
-                Only ticket supply and base price can be updated on-chain.
+                Only ticket supply and pricing can be updated on-chain.
               </p>
             </div>
 
@@ -123,50 +141,67 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Max Tickets */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)]">
-                  Total Ticket Supply
-                </label>
-                <div className="flex justify-between p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                  <span className="text-[10px] text-white/30 uppercase font-bold">Currently Sold</span>
-                  <span className="text-[10px] font-black text-white/60">{totalSold} / {totalSupply}</span>
+              {/* Per-Tier Supply & Price */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)] flex items-center gap-1.5">
+                    <Layers size={12} />
+                    Ticket Tiers
+                  </label>
+                  <span className="text-[9px] font-black text-white/30 uppercase tracking-widest">
+                    Total: {newTotalSupply}
+                  </span>
                 </div>
-                <input
-                  type="number"
-                  min={totalSold}
-                  max={16777215}
-                  step={1}
-                  required
-                  value={maxTickets}
-                  onChange={e => setMaxTickets(Number(e.target.value))}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-bold text-white"
-                />
-                {maxTickets < totalSold && (
-                  <p className="text-[10px] text-red-400 font-bold">
-                    Must be ≥ {totalSold} (tickets already sold)
-                  </p>
-                )}
-              </div>
 
-              {/* Base Price */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)]">
-                  Base Price (ETH)
-                </label>
-                <div className="flex justify-between p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                  <span className="text-[10px] text-white/30 uppercase font-bold">Current Price</span>
-                  <span className="text-[10px] font-black text-white/60">{currentPriceEth} ETH</span>
+                <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
+                  {event.tiers.map((tier, idx) => (
+                    <div key={tier.id} className="p-3 rounded-xl bg-white/[0.03] border border-white/5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-white uppercase tracking-wider">{tier.name}</span>
+                        <span className="text-[9px] font-bold text-white/30">
+                          {tier.sold} sold
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <span className="text-[8px] font-black uppercase tracking-widest text-white/20">Supply</span>
+                          <input
+                            type="number"
+                            min={tier.sold}
+                            max={16777215}
+                            step={1}
+                            required
+                            value={tierSupplies[idx]}
+                            onChange={e => updateTierSupply(idx, Number(e.target.value))}
+                            className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-sm ${
+                              tierSupplyErrors[idx] ? 'border-red-500/50 focus:border-red-500' : 'border-white/10 focus:border-[var(--accent-teal)]'
+                            }`}
+                          />
+                          {tierSupplyErrors[idx] && (
+                            <p className="text-[8px] text-red-400 font-bold">{tierSupplyErrors[idx]}</p>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-[8px] font-black uppercase tracking-widest text-white/20">Price (ETH)</span>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min="0.0001"
+                            required
+                            value={tierPrices[idx]}
+                            onChange={e => updateTierPrice(idx, Number(e.target.value))}
+                            className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-sm ${
+                              tierPriceErrors[idx] ? 'border-red-500/50 focus:border-red-500' : 'border-white/10 focus:border-[var(--accent-teal)]'
+                            }`}
+                          />
+                          {tierPriceErrors[idx] && (
+                            <p className="text-[8px] text-red-400 font-bold">{tierPriceErrors[idx]}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <input
-                  type="number"
-                  step="0.0001"
-                  min="0.0001"
-                  required
-                  value={priceEth}
-                  onChange={e => setPriceEth(Number(e.target.value))}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-bold text-white"
-                />
               </div>
 
               <button

@@ -23,6 +23,7 @@ interface ChainFinancials {
   totalRevenueWei: bigint;
   deploymentCostWei: bigint;
   gasUsed: bigint;
+  tokenCount: number; // how many tokens we found on-chain for this event
 }
 
 interface EventFinancialsModalProps {
@@ -74,6 +75,10 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
       }
 
       // 3. Fetch purchase prices for event tokens
+      // Only count tokens that have a recorded purchase price (> 0).
+      // Pre-upgrade tokens (purchasePrice == 0) are still counted as sold but
+      // their revenue is unknown — we do NOT substitute the current base price
+      // because the organiser may have edited it since the sale.
       let primaryRevenueWei = 0n;
       if (eventTokenIds.length > 0) {
         const prices = await Promise.all(
@@ -81,9 +86,9 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
         );
         for (const p of prices) {
           const gweiVal = BigInt(p);
-          // If purchase price is 0 (pre-upgrade tokens), use the event base price
-          const effectiveGwei = gweiVal > 0n ? gweiVal : priceGwei;
-          primaryRevenueWei += effectiveGwei * BigInt(1e9);
+          if (gweiVal > 0n) {
+            primaryRevenueWei += gweiVal * BigInt(1e9);
+          }
         }
       }
 
@@ -123,6 +128,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
         priceGwei, maxTickets, ticketsSold, royaltyPct,
         primaryRevenueWei, totalRevenueWei,
         deploymentCostWei, gasUsed,
+        tokenCount: eventTokenIds.length,
       });
     } catch (err: any) {
       console.error("Failed to fetch financials:", err);
@@ -167,12 +173,8 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
   const currentPriceEth = financials ? parseFloat(ethers.formatUnits(financials.priceGwei, "gwei")) : (tiers[0]?.price ?? 0);
   const royaltyPct = financials?.royaltyPct ?? event.royaltyBps;
 
-  // Tier revenue from store (fallback when chain data loading)
-  const tierRevenue = tiers.map(tier => ({
-    ...tier,
-    revenue: (Number(tier.sold) || 0) * (Number(tier.price) || 0)
-  }));
-  const storeTotalRevenue = tierRevenue.reduce((acc, t) => acc + t.revenue, 0);
+  // For the tier table we show sold counts from store (per-tier) 
+  // but revenue only from the on-chain total (not sold × current price, which is wrong after edits)
 
   return (
     <motion.div
@@ -240,7 +242,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
               <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Total Revenue</p>
               <h3 className="text-3xl font-black text-white italic">
                 {isLoading ? <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-teal)]" /> :
-                  financials ? formatEthValue(totalRevenueWei) : formatValue(storeTotalRevenue)
+                  formatEthValue(totalRevenueWei)
                 }
               </h3>
               <div className="mt-4 flex items-center gap-2">
@@ -315,26 +317,29 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {tierRevenue.length > 0 ? tierRevenue.map((tier, idx) => (
+                  {tiers.length > 0 ? tiers.map((tier, idx) => {
+                    const progress = tier.supply > 0 ? (tier.sold / tier.supply) * 100 : 0;
+                    return (
                     <tr key={idx} className="text-xs hover:bg-white/[0.03] transition-all group">
                       <td className="px-8 py-6 font-black text-white uppercase tracking-wider">{tier.name}</td>
                       <td className="px-8 py-6 text-zinc-400 font-mono">{formatValue(tier.price)}</td>
                       <td className="px-8 py-6 text-zinc-400 font-bold">{tier.sold} <span className="text-zinc-600 font-normal">/ {tier.supply}</span></td>
-                      <td className="px-8 py-6 text-[var(--accent-teal)] font-black italic">{formatValue(tier.revenue)}</td>
+                      <td className="px-8 py-6 text-zinc-500 font-bold italic">—</td>
                       <td className="px-8 py-6">
                         <div className="flex items-center justify-end gap-4">
                           <div className="w-20 h-1.5 bg-white/5 rounded-full overflow-hidden">
                             <motion.div
                               initial={{ width: 0 }}
-                              animate={{ width: `${tier.supply > 0 ? (tier.sold / tier.supply) * 100 : 0}%` }}
+                              animate={{ width: `${progress}%` }}
                               className="h-full bg-[var(--accent-teal)] shadow-[0_0_10px_rgba(45,212,191,0.5)]"
                             />
                           </div>
-                          <span className="text-[9px] font-black text-zinc-600">{tier.supply > 0 ? Math.round((tier.sold / tier.supply) * 100) : 0}%</span>
+                          <span className="text-[9px] font-black text-zinc-600">{Math.round(progress)}%</span>
                         </div>
                       </td>
                     </tr>
-                  )) : (
+                    );
+                  }) : (
                     <tr>
                       <td colSpan={5} className="px-8 py-12 text-center text-zinc-600 text-[10px] font-black uppercase tracking-widest italic">
                         No sales data available for this event
