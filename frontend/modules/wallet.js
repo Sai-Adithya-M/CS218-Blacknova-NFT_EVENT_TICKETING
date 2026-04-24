@@ -22,6 +22,15 @@ export async function connectWallet() {
 }
 
 /**
+ * Disconnect the wallet (clear local state)
+ */
+export function disconnectWallet() {
+  currentAccount = null;
+  signer = null;
+  provider = null;
+}
+
+/**
  * Silently reconnect if already authorized (no MetaMask popup)
  */
 export async function silentConnect() {
