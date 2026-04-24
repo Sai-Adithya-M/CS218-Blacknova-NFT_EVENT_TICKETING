@@ -87,13 +87,16 @@ export const useEventStore = create<EventState>((set, get) => ({
           category: metadata.category || e.category,
           imageUrl: metadata.image || e.imageUrl,
           hasIpfsError: false,
-          tiers: (metadata.tiers && Array.isArray(metadata.tiers)) ? metadata.tiers.map((t: any, tidx: number) => ({
-            id: t.id || `${eventId}_tier_${tidx}`,
-            name: t.name || 'Tier',
-            price: t.price || e.tiers[0]?.price,
-            supply: t.supply || e.tiers[0]?.supply,
-            sold: e._tierSales ? (e._tierSales[tidx] || 0) : (tidx === 0 ? (e.tiers[0]?.sold || 0) : 0)
-          })) : e.tiers
+          tiers: (metadata.tiers && Array.isArray(metadata.tiers)) ? metadata.tiers.map((t: any, tidx: number) => {
+            const hasSalesData = e._tierSales && Object.keys(e._tierSales).length > 0;
+            return {
+              id: t.id || `${eventId}_tier_${tidx}`,
+              name: t.name || 'Tier',
+              price: t.price || e.tiers[0]?.price,
+              supply: t.supply || e.tiers[0]?.supply,
+              sold: hasSalesData ? (e._tierSales![tidx] || 0) : (tidx === 0 ? (e.tiers[0]?.sold || 0) : 0)
+            };
+          }) : e.tiers
         } : e)
       }));
     } else {
@@ -142,7 +145,13 @@ export const useEventStore = create<EventState>((set, get) => ({
       try {
         const mintedFilter = contract.filters.TicketMinted();
         const fromBlock = config.deploymentBlock || 5700000; 
-        const mintedLogs = await contract.queryFilter(mintedFilter, fromBlock);
+        
+        let mintedLogs: any[] = [];
+        try {
+          mintedLogs = await contract.queryFilter(mintedFilter, fromBlock);
+        } catch(e) {
+          mintedLogs = await contract.queryFilter(mintedFilter, -10000).catch(() => []);
+        }
         
         mintedLogs.forEach((log: any) => {
           if (log.args) {

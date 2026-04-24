@@ -10,7 +10,12 @@ const ABI = [
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
   "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
   "function getResaleListing(uint tokenId) public view returns (tuple(address seller, uint256 priceWei, bool active))",
-  "function nextTokenId() public view returns (uint256)"
+  "function nextTokenId() public view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+  "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
+  "event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei)",
+  "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)",
+  "event ListingCancelled(uint256 indexed tokenId)"
 ];
 
 // Fallback map if metadata is unreachable
@@ -100,61 +105,117 @@ export const useTicketStore = create<TicketState>((set) => ({
       const provider = getReadProvider();
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
       
-      const loadedTickets: Ticket[] = [];
-      const metadataCache: Record<string, any> = {};
+      const fromBlock = config.deploymentBlock || 5700000;
+      
+      const [
+        transferLogs,
+        mintedLogs,
+        listedLogs,
+        resoldLogs,
+        cancelledLogs
+      ] = await Promise.all([
+        contract.queryFilter(contract.filters.Transfer(), fromBlock).catch(() => contract.queryFilter(contract.filters.Transfer(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.TicketMinted(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketMinted(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.TicketListed(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketListed(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.TicketResold(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketResold(), -10000).catch(() => [])),
+        contract.queryFilter(contract.filters.ListingCancelled(), fromBlock).catch(() => contract.queryFilter(contract.filters.ListingCancelled(), -10000).catch(() => []))
+      ]);
 
-      const nextTokenId = await contract.nextTokenId();
-      const totalTokens = Number(nextTokenId) - 1;
+      const owners: Record<string, string> = {};
+      const tokenEvents: Record<string, string> = {};
+      const tokenTiers: Record<string, number> = {};
+      const listings: Record<string, { priceWei: bigint, active: boolean }> = {};
 
-      for (let i = 1; i <= totalTokens; i++) {
-        try {
-          const currentOwner = await contract.ownerOf(i);
-          const listing = await contract.getResaleListing(i);
-          const isActiveListing = listing.active || listing[2];
-          
-          const isUserOwned = userAddress && currentOwner.toLowerCase() === userAddress.toLowerCase();
+      transferLogs.forEach((log: any) => {
+        if (log.args) owners[log.args.tokenId.toString()] = log.args.to.toLowerCase();
+      });
 
-          if (isUserOwned || isActiveListing) {
-            const eventIdNum = await contract.tokenToEvent(i);
-            const tierIndex = await contract.tokenToTier(i);
-            const eventKey = eventIdNum.toString();
-
-            if (!metadataCache[eventKey]) {
-              const evtData = await contract.fetchEventData(eventIdNum);
-              const hash = evtData.ipfsHash || evtData[6];
-              metadataCache[eventKey] = {
-                data: evtData,
-                metadata: hash ? await fetchFromIPFS(hash) : null
-              };
-            }
-
-            const { data: evt, metadata } = metadataCache[eventKey];
-            let tierName = TIER_MAP[Number(tierIndex)] || 'General';
-            
-            if (metadata?.tiers?.[Number(tierIndex)]) {
-              tierName = metadata.tiers[Number(tierIndex)].name;
-            }
-
-            const resalePrice = isActiveListing ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined;
-            const basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
-
-            loadedTickets.push({
-              id: `tkt_${i}`,
-              tokenId: i.toString(),
-              txHash: '', 
-              eventId: `evt_${eventIdNum}`,
-              ownerId: currentOwner,
-              tierName: tierName,
-              tierPrice: basePrice,
-              status: isActiveListing ? 'resale' : 'active',
-              purchasedAt: new Date().toISOString(), 
-              resalePrice: resalePrice,
-            });
-          }
-        } catch (e) {
-          // Token skip
+      mintedLogs.forEach((log: any) => {
+        if (log.args) {
+          const tId = log.args.tokenId.toString();
+          tokenEvents[tId] = log.args.eventId.toString();
+          tokenTiers[tId] = Number(log.args.tier);
         }
-      }
+      });
+
+      listedLogs.forEach((log: any) => {
+        if (log.args) {
+          listings[log.args.tokenId.toString()] = { priceWei: log.args.priceWei, active: true };
+        }
+      });
+
+      resoldLogs.forEach((log: any) => {
+        if (log.args) {
+          const tId = log.args.tokenId.toString();
+          if (listings[tId]) listings[tId].active = false;
+        }
+      });
+
+      cancelledLogs.forEach((log: any) => {
+        if (log.args) {
+          const tId = log.args.tokenId.toString();
+          if (listings[tId]) listings[tId].active = false;
+        }
+      });
+
+      const relevantTokens: string[] = [];
+      const userLower = userAddress?.toLowerCase() || "";
+      
+      Object.keys(owners).forEach(tId => {
+        const isOwned = userLower && owners[tId] === userLower;
+        const isActiveListing = listings[tId]?.active;
+        if (isOwned || isActiveListing) {
+          relevantTokens.push(tId);
+        }
+      });
+
+      const uniqueEvents = [...new Set(relevantTokens.map(tId => tokenEvents[tId]))];
+      const eventDataCache: Record<string, any> = {};
+
+      await Promise.all(uniqueEvents.map(async (eventIdNum) => {
+        if (!eventIdNum) return;
+        try {
+          const evtData = await contract.fetchEventData(eventIdNum);
+          const hash = evtData.ipfsHash || evtData[6];
+          eventDataCache[eventIdNum] = {
+            data: evtData,
+            metadata: hash ? await fetchFromIPFS(hash).catch(() => null) : null
+          };
+        } catch (e) {}
+      }));
+
+      const loadedTickets: Ticket[] = [];
+
+      relevantTokens.forEach(tId => {
+        const eventIdNum = tokenEvents[tId];
+        if (!eventIdNum || !eventDataCache[eventIdNum]) return;
+        
+        const { data: evt, metadata } = eventDataCache[eventIdNum];
+        const tierIndex = tokenTiers[tId] || 0;
+        
+        let tierName = TIER_MAP[tierIndex] || 'General';
+        if (metadata?.tiers?.[tierIndex]) {
+          tierName = metadata.tiers[tierIndex].name;
+        }
+
+        const isActiveListing = listings[tId]?.active;
+        const resalePriceWei = listings[tId]?.priceWei;
+        const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatEther(resalePriceWei)) : undefined;
+        const basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
+
+        loadedTickets.push({
+          id: `tkt_${tId}`,
+          tokenId: tId,
+          txHash: '', 
+          eventId: `evt_${eventIdNum}`,
+          ownerId: owners[tId],
+          tierName: tierName,
+          tierPrice: basePrice,
+          status: isActiveListing ? 'resale' : 'active',
+          purchasedAt: new Date().toISOString(), 
+          resalePrice: resalePrice,
+        });
+      });
 
       set({ tickets: loadedTickets.reverse(), isLoading: false });
     } catch (err) {
