@@ -119,13 +119,13 @@ graph TD
 
 ##   Future Enhancements
 
-- [ ] **Ticket verification via QR code**: A secure scanner for event entry to verify NFT ownership instantly.
-- [ ] **WalletConnect & Coinbase Wallet support**: Expanding accessibility beyond MetaMask.
-- [ ] **Native mobile app**: A dedicated experience for managing and browsing tickets on the go.
-- [ ] **Fiat onramps for ticket purchase**: Allow users to buy NFT tickets using credit cards and local currency.
-- [ ] **Real-time analytics dashboard**: Advanced tracking for organizers to monitor sales and audience demographics.
-- [ ] **Email & calendar integration**: Automatically sync event details to user calendars and send receipt emails.
-- [ ] **On-chain ticket history viewer**: A transparent ledger to track the provenance and previous owners of every ticket.
+-  **Ticket verification via QR code**: A secure scanner for event entry to verify NFT ownership instantly.
+-  **WalletConnect & Coinbase Wallet support**: Expanding accessibility beyond MetaMask.
+-  **Native mobile app**: A dedicated experience for managing and browsing tickets on the go.
+-  **Fiat onramps for ticket purchase**: Allow users to buy NFT tickets using credit cards and local currency.
+-  **Real-time analytics dashboard**: Advanced tracking for organizers to monitor sales and audience demographics.
+-  **Email & calendar integration**: Automatically sync event details to user calendars and send receipt emails.
+-  **On-chain ticket history viewer**: A transparent ledger to track the provenance and previous owners of every ticket.
 
 ---
 
