@@ -2,7 +2,7 @@ import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
 
 dotenv.config();
-require("hardhat-gas-reporter");
+import "hardhat-gas-reporter";
 
 export default {
   solidity: {
