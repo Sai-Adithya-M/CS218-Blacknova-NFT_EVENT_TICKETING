@@ -194,14 +194,18 @@ export const useTicketStore = create<TicketState>((set) => ({
         const tierIndex = tokenTiers[tId] || 0;
         
         let tierName = TIER_MAP[tierIndex] || 'General';
+        let basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
+
         if (metadata?.tiers?.[tierIndex]) {
           tierName = metadata.tiers[tierIndex].name;
+          if (metadata.tiers[tierIndex].price !== undefined) {
+            basePrice = metadata.tiers[tierIndex].price;
+          }
         }
 
         const isActiveListing = listings[tId]?.active;
         const resalePriceWei = listings[tId]?.priceWei;
         const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatEther(resalePriceWei)) : undefined;
-        const basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
 
         loadedTickets.push({
           id: `tkt_${tId}`,
