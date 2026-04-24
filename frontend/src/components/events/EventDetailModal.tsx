@@ -41,12 +41,24 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const [purchasedTxHash, setPurchasedTxHash] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const { buyTicket, buyResaleTicket: storeBuyResale, tickets } = useTicketStore();
+  const { buyTicket, buyResaleTicket: storeBuyResale, tickets, fetchTicketsFromChain } = useTicketStore();
   const { incrementTierSold } = useEventStore();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, walletAddress } = useAuthStore();
+
+  React.useEffect(() => {
+    if (isOpen && event) {
+      console.log(`[EventModal] Opening event: ${event.id}, Store has ${tickets.length} total tickets.`);
+      fetchTicketsFromChain(walletAddress || undefined);
+    }
+  }, [isOpen, event?.id, walletAddress, fetchTicketsFromChain]);
 
   const { src: modalImageSrc } = useIPFSImage(event?.imageUrl);
-  const resaleTickets = tickets.filter(t => t.eventId === event?.id && t.status === 'resale');
+  const resaleTickets = tickets.filter(t => {
+    const isMatch = t.eventId === event?.id && t.status === 'resale';
+    return isMatch;
+  });
+
+  console.log(`[EventModal] Resale tickets for ${event?.id}:`, resaleTickets.length);
 
   if (!isOpen || !event) return null;
 
@@ -101,6 +113,10 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       
       event.tiers.forEach((tier, idx) => {
         const q = getTierQuantity(tier.id);
+        const remaining = tier.supply - tier.sold;
+        if (q > remaining) {
+          throw new Error(`Insufficient inventory for ${tier.name}. Only ${remaining} left.`);
+        }
         if (q > 0) {
           tierIndices.push(idx);
           tierQtys.push(q);
@@ -233,7 +249,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                               <div className="flex items-center justify-between mb-4">
                                 <div>
                                   <p className="font-black tracking-tight italic text-sm text-white">{tier.name}</p>
-                                  <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">{tier.sold} / {tier.supply} Sold</p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <p className="text-[10px] text-white/40 font-bold uppercase">{tier.sold} / {tier.supply} Sold</p>
+                                    <div className="w-1 h-1 rounded-full bg-white/10" />
+                                    <p className="text-[10px] text-[var(--accent-teal)] font-bold uppercase">{tier.supply - tier.sold - q} Remaining</p>
+                                  </div>
                                 </div>
                                 <div className="text-right">
                                   <p className="text-sm font-black text-[var(--accent-teal)]">{tier.price} ETH</p>
@@ -242,9 +262,21 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                               </div>
                               {!isSoldOut && !isOrganizer && (
                                 <div className="flex items-center justify-center gap-6 pt-2 border-t border-white/5">
-                                  <button onClick={() => updateTierQuantity(tier.id, -1, 10)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Minus size={14} /></button>
+                                  <button 
+                                    onClick={() => updateTierQuantity(tier.id, -1, tier.supply - tier.sold)} 
+                                    disabled={q === 0}
+                                    className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all disabled:opacity-20"
+                                  >
+                                    <Minus size={14} />
+                                  </button>
                                   <span className="w-4 text-center font-black italic text-white text-base">{q}</span>
-                                  <button onClick={() => updateTierQuantity(tier.id, 1, Math.min(10, tier.supply - tier.sold))} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Plus size={14} /></button>
+                                  <button 
+                                    onClick={() => updateTierQuantity(tier.id, 1, tier.supply - tier.sold)} 
+                                    disabled={q >= (tier.supply - tier.sold)}
+                                    className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all disabled:opacity-20"
+                                  >
+                                    <Plus size={14} />
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -257,15 +289,36 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                       <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic">Secondary Listings</h3>
                       {resaleTickets.length > 0 ? (
                         <div className="grid gap-3">
-                          {resaleTickets.map((t) => (
-                            <button key={t.id} onClick={() => setSelectedResaleTicket(t)} className={`flex items-center justify-between p-5 rounded-2xl border transition-all text-left ${selectedResaleTicket?.id === t.id ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 shadow-lg shadow-teal-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
-                              <div>
-                                <p className="font-black tracking-tight italic text-sm text-white">{t.tierName}</p>
-                                <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">Token #{t.tokenId.slice(-6)}</p>
-                              </div>
-                              <p className="text-sm font-black text-white">{t.resalePrice} ETH</p>
-                            </button>
-                          ))}
+                          {resaleTickets.map((t) => {
+                            const isOwner = user?.walletAddress?.toLowerCase() === t.ownerId?.toLowerCase();
+                            const isOrganiser = user?.walletAddress?.toLowerCase() === event.organizerId?.toLowerCase();
+                            const canBuy = !isOwner && !isOrganiser;
+
+                            return (
+                              <button 
+                                key={t.id} 
+                                onClick={() => canBuy && setSelectedResaleTicket(t)} 
+                                disabled={!canBuy}
+                                className={`flex items-center justify-between p-5 rounded-2xl border transition-all text-left ${
+                                  selectedResaleTicket?.id === t.id 
+                                    ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 shadow-lg shadow-teal-500/10' 
+                                    : !canBuy
+                                    ? 'opacity-40 border-white/5 cursor-not-allowed'
+                                    : 'border-white/10 bg-white/5 hover:bg-white/10'
+                                }`}
+                              >
+                                <div>
+                                  <p className="font-black tracking-tight italic text-sm text-white">{t.tierName}</p>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <p className="text-[10px] text-white/40 font-bold uppercase">Token #{t.tokenId}</p>
+                                    {isOwner && <span className="text-[8px] font-black uppercase text-[var(--accent-purple)]">(You own this)</span>}
+                                    {isOrganiser && <span className="text-[8px] font-black uppercase text-red-400">(Organiser)</span>}
+                                  </div>
+                                </div>
+                                <p className="text-sm font-black text-white">{t.resalePrice} ETH</p>
+                              </button>
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="p-10 text-center rounded-2xl bg-white/5 border border-dashed border-white/10">
