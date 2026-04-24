@@ -11,6 +11,7 @@ const ABI = [
   // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
   "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
   "function getResaleListing(uint256 tokenId) public view returns (tuple(address seller, uint48 priceWei, bool active))",
+  "function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48)",
   "function nextTokenId() public view returns (uint256)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
@@ -196,6 +197,20 @@ export const useTicketStore = create<TicketState>((set) => ({
         } catch (e) {}
       }));
 
+      // Fetch actual purchase prices from chain for all relevant tokens
+      const purchasePrices: Record<string, number> = {};
+      await Promise.all(
+        relevantTokens.map(async (tId) => {
+          try {
+            const priceGwei = await contract.getTokenPurchasePrice(tId);
+            const priceEth = parseFloat(ethers.formatUnits(priceGwei, "gwei"));
+            if (priceEth > 0) {
+              purchasePrices[tId] = priceEth;
+            }
+          } catch {}
+        })
+      );
+
       const loadedTickets: Ticket[] = [];
 
       relevantTokens.forEach(tId => {
@@ -206,7 +221,7 @@ export const useTicketStore = create<TicketState>((set) => ({
         const tierIndex = tokenTiers[tId] || 0;
         
         let tierName = TIER_MAP[tierIndex] || 'General';
-        // priceWei stored as gwei in the contract (uint40); convert to ETH for UI
+        // Fallback: base event price in gwei → ETH
         let basePrice = parseFloat(ethers.formatUnits(evt.priceWei || evt[1], "gwei"));
 
         if (metadata?.tiers?.[tierIndex]) {
@@ -215,6 +230,9 @@ export const useTicketStore = create<TicketState>((set) => ({
             basePrice = metadata.tiers[tierIndex].price;
           }
         }
+
+        // Use on-chain purchase price (actual price paid) if available
+        const actualPrice = purchasePrices[tId] ?? basePrice;
 
         const isActiveListing = listings[tId]?.active;
         const resalePriceWei = listings[tId]?.priceWei;
@@ -228,7 +246,7 @@ export const useTicketStore = create<TicketState>((set) => ({
           eventId: `evt_${eventIdNum}`,
           ownerId: owners[tId],
           tierName: tierName,
-          tierPrice: basePrice,
+          tierPrice: actualPrice,
           status: isActiveListing ? 'resale' : 'active',
           purchasedAt: new Date().toISOString(), 
           resalePrice: resalePrice,
