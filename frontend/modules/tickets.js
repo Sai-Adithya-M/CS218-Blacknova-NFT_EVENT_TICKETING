@@ -44,7 +44,8 @@ export async function fetchData() {
  */
 export async function listForResale(tokenId, priceEth) {
   const contract = await getContract();
-  const priceWei = ethers.parseEther(priceEth);
+  // Contract stores resale price in gwei (uint48), so convert ETH -> gwei
+  const priceWei = ethers.parseUnits(priceEth, 'gwei');
 
   showLoading('Listing ticket for resale...');
   try {
@@ -101,7 +102,7 @@ export function renderMyTickets(tickets, container, onRefresh) {
         ${ticket.isListed ? `
           <div class="card-stat">
             <span class="stat-label">Listed Price</span>
-            <span class="stat-value">${ethers.formatEther(ticket.listingPrice)} ETH</span>
+            <span class="stat-value">${ethers.formatEther(BigInt(ticket.listingPrice) * BigInt(1e9))} ETH</span>
           </div>
         ` : ''}
       </div>

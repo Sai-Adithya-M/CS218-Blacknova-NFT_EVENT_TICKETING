@@ -57,7 +57,8 @@ export async function buyResaleTicket(tokenId, priceWei) {
 
   showLoading('Purchasing resale ticket...');
   try {
-    const tx = await contract.buyResaleTicket(tokenId, { value: BigInt(priceWei) });
+    // priceWei from contract is actually in gwei; multiply by 1e9 to get real wei
+    const tx = await contract.buyResaleTicket(tokenId, { value: BigInt(priceWei) * BigInt(1e9) });
     showLoading('Waiting for confirmation...');
     await tx.wait();
     showToast('Resale ticket purchased! 🎉', 'success');
@@ -113,8 +114,9 @@ export function renderMarketplace(listings, container, onRefresh) {
   const account = getCurrentAccount();
 
   listings.forEach((listing) => {
-    const priceEth = ethers.formatEther(listing.priceWei);
-    const originalPriceEth = ethers.formatEther(listing.originalPriceWei);
+    // Contract stores prices in gwei, convert to wei for ETH display
+    const priceEth = ethers.formatEther(BigInt(listing.priceWei) * BigInt(1e9));
+    const originalPriceEth = ethers.formatEther(BigInt(listing.originalPriceWei) * BigInt(1e9));
     const isSeller = account && listing.seller.toLowerCase() === account.toLowerCase();
 
     const card = document.createElement('div');
