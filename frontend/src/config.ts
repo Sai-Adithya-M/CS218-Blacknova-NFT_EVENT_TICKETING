@@ -5,5 +5,6 @@ export const config = {
   // Using a cluster of reliable public RPC nodes
   sepoliaRpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
   // Deployment Block updated to stay within 50k block range: 10680000
-  deploymentBlock: 0,
+  deploymentBlock: 5700000,
+
 };

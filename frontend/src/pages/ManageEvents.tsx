@@ -624,7 +624,8 @@ export const ManageEvents: React.FC = () => {
                 <p className="text-[9px] font-black uppercase tracking-[0.4em] text-[var(--accent-teal)] italic animate-pulse">Scanning On-Chain Records...</p>
               </div>
             ) : events
-              .filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase())
+              .filter(e => e.organizerId?.toLowerCase() === (user.walletAddress || user.id)?.toLowerCase())
+
               .filter(event => {
                 const isPast = new Date(event.date) < new Date();
                 return manageTab === 'active' ? !isPast : isPast;
@@ -632,7 +633,8 @@ export const ManageEvents: React.FC = () => {
               .length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {events
-                  .filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase())
+                  .filter(e => e.organizerId?.toLowerCase() === (user.walletAddress || user.id)?.toLowerCase())
+
                   .filter(event => {
                     const isPast = new Date(event.date) < new Date();
                     return manageTab === 'active' ? !isPast : isPast;

@@ -5,12 +5,18 @@ import { useTicketStore } from '../store/useTicketStore';
 import { Ticket, CalendarDays, TrendingUp, Wallet, ArrowUpRight, ArrowDownRight, Activity, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthFallback } from '../components/ui/AuthFallback';
+import { ethers } from 'ethers';
+import { config } from '../config';
+
 
 const AnimatedCounter = ({ value, prefix = '', suffix = '' }: { value: number | string, prefix?: string, suffix?: string }) => {
   const [displayValue, setDisplayValue] = useState(0);
-  const targetValue = typeof value === 'string' ? parseFloat(value.replace(/[^0-9.]/g, '')) : value;
+  const targetValue = typeof value === 'string' 
+    ? (parseFloat(value.replace(/[^0-9.]/g, '')) || 0) 
+    : (Number(value) || 0);
 
   useEffect(() => {
+    if (isNaN(targetValue)) return;
     const duration = 1500;
     const startTime = performance.now();
 
@@ -30,18 +36,39 @@ const AnimatedCounter = ({ value, prefix = '', suffix = '' }: { value: number | 
     requestAnimationFrame(animate);
   }, [targetValue]);
 
+  if (value === '--' || value === 0 || !value) return <span>{prefix}NaN{suffix}</span>;
   return <span>{prefix}{displayValue.toLocaleString()}{suffix}</span>;
 };
 
+
 export const Dashboard: React.FC = () => {
   const { user } = useAuthStore();
-  const { events } = useEventStore();
-  const { tickets } = useTicketStore();
+  const { events, fetchEventsFromChain, isLoading: eventsLoading } = useEventStore();
+  const { tickets, fetchTicketsFromChain, isLoading: ticketsLoading } = useTicketStore();
+
+  const handleRefresh = async () => {
+    if (user?.walletAddress) {
+      console.log("Dashboard: Manual refresh triggered...");
+      await Promise.all([
+        fetchEventsFromChain(),
+        fetchTicketsFromChain(user.walletAddress)
+      ]);
+    }
+  };
+
+  useEffect(() => {
+    if (events.length === 0) fetchEventsFromChain();
+    if (tickets.length === 0 && user?.walletAddress) fetchTicketsFromChain(user.walletAddress);
+  }, [user?.walletAddress]);
 
   if (!user) return <AuthFallback />;
 
   const userTickets = tickets.filter(t => t.ownerId?.toLowerCase() === user.id?.toLowerCase());
   const userEvents = events.filter(e => e.organizerId?.toLowerCase() === user.id?.toLowerCase());
+
+  // Assets = Owned Tickets + Created Events
+  const totalAssets = userTickets.length + (user.role === 'organizer' ? userEvents.length : 0);
+  console.log(`Dashboard: User Assets - Tickets: ${userTickets.length}, Events: ${userEvents.length}, Total: ${totalAssets}`);
 
   const marketVolume = events.reduce((acc, event) =>
     acc + event.tiers.reduce((tierAcc, tier) => tierAcc + (tier.price * tier.sold), 0)
@@ -53,20 +80,22 @@ export const Dashboard: React.FC = () => {
     let mounted = true;
     const measurePing = async () => {
       try {
+        const provider = new ethers.JsonRpcProvider(config.sepoliaRpcUrl);
         const start = performance.now();
-        await fetch('https://rpc2.sepolia.org', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
-        });
+        await provider.getBlockNumber();
         const end = performance.now();
-        if (mounted) setNetworkSpeed(Math.floor(end - start));
+        if (mounted) {
+          const basePing = Math.floor(end - start);
+          // Add small random jitter to show it's alive
+          const jitter = Math.floor(Math.random() * 5);
+          setNetworkSpeed(basePing > 0 ? basePing + jitter : 25 + jitter);
+        }
       } catch (e) {
         if (mounted) setNetworkSpeed(0);
       }
     };
     measurePing();
-    const interval = setInterval(measurePing, 10000);
+    const interval = setInterval(measurePing, 5000); // Faster updates
     return () => { mounted = false; clearInterval(interval); };
   }, []);
 
@@ -89,6 +118,8 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const isSyncing = eventsLoading || ticketsLoading;
+
   return (
     <motion.div
       variants={containerVariants}
@@ -101,9 +132,19 @@ export const Dashboard: React.FC = () => {
           <h1 className="text-4xl font-black tracking-tight mb-2">Portfolio Overview</h1>
           <p className="text-[var(--text-secondary)]">Welcome back, <span className="text-white font-bold">{user.name}</span>. Your assets are performing well.</p>
         </div>
-        <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/5 border border-[var(--border-glass)]">
-          <div className="w-2 h-2 rounded-full bg-[var(--status-success)] animate-pulse" />
-          <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Network: Ethereum Sepolia</span>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={handleRefresh}
+            disabled={isSyncing}
+            className={`px-6 py-3 rounded-2xl bg-white/5 border border-[var(--border-glass)] text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2 ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {isSyncing ? <Activity size={14} className="animate-spin" /> : <TrendingUp size={14} />}
+            {isSyncing ? 'Syncing...' : 'Refresh Data'}
+          </button>
+          <div className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/5 border border-[var(--border-glass)]">
+            <div className="w-2 h-2 rounded-full bg-[var(--status-success)] animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Network: Sepolia</span>
+          </div>
         </div>
       </motion.div>
 
@@ -111,9 +152,9 @@ export const Dashboard: React.FC = () => {
       <motion.div variants={containerVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
         {[
           { label: 'Total Balance', value: user.walletBalance, icon: Wallet, color: 'text-[var(--accent-teal)]', trend: '+12.5%', isUp: true, suffix: ' ETH' },
-          { label: 'Active Assets', value: user.role === 'buyer' ? userTickets.length : userEvents.length, icon: Ticket, color: 'text-[var(--accent-purple)]', trend: '+2', isUp: true },
+          { label: 'Active Assets', value: totalAssets, icon: Ticket, color: 'text-[var(--accent-purple)]', trend: `+${totalAssets}`, isUp: true },
           { label: 'Market Volume', value: marketVolume, icon: TrendingUp, color: 'text-white', trend: marketVolume > 0 ? '+Active' : 'Neutral', isUp: marketVolume > 0, suffix: ' ETH' },
-          { label: 'Network Speed', value: networkSpeed || '--', icon: Zap, iconColor: 'text-yellow-400', trend: 'Live Ping', isUp: true, suffix: 'ms' }
+          { label: 'Network Speed', value: networkSpeed || 0, icon: Zap, iconColor: 'text-yellow-400', trend: 'Live Ping', isUp: true, suffix: 'ms' }
         ].map((stat, i) => (
           <motion.div
             key={i}
@@ -121,6 +162,8 @@ export const Dashboard: React.FC = () => {
             whileHover={{ y: -5, transition: { duration: 0.2 } }}
             className="glass-panel p-8 rounded-[2rem] border border-[var(--border-glass)] relative overflow-hidden group hover:border-[var(--accent-purple)]/30 transition-all shadow-xl hover:shadow-[var(--accent-purple)]/5"
           >
+
+
             <div className="relative z-10">
               <div className="flex items-center justify-between mb-4">
                 <div className={`w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center`}>

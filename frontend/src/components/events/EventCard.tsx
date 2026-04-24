@@ -7,12 +7,13 @@ import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 interface EventCardProps {
   event: Event;
-  variant?: 'small' | 'large';
   index?: number;
   showEtherscan?: boolean;
 }
 
-export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', index = 0, showEtherscan = false }) => {
+
+export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEtherscan = false }) => {
+
   const date = new Date(event.date);
   const lowestPrice = event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0;
   const totalSold = event.tiers?.reduce((sum, t) => sum + t.sold, 0) ?? 0;
@@ -60,113 +61,105 @@ export const EventCard: React.FC<EventCardProps> = ({ event, variant = 'small', 
         rotateY,
         transformStyle: "preserve-3d",
       }}
-      className={`group relative glass-panel rounded-3xl overflow-hidden border border-[var(--border-glass)] hover:border-[var(--accent-purple)]/50 transition-colors duration-500 cursor-pointer ${variant === 'large' ? 'h-[400px]' : 'h-[360px]'}`}
+      className={`group relative glass-panel rounded-3xl overflow-hidden border border-[var(--border-glass)] hover:border-[var(--accent-purple)]/50 transition-all duration-500 cursor-pointer flex flex-col bg-zinc-900/40 hover:bg-zinc-900/60 shadow-xl`}
     >
-      {/* Background Glow Overlay */}
-      <div 
-        className="absolute inset-0 z-10 bg-gradient-to-b from-transparent via-transparent to-[#000]/90" 
-        style={{ transform: "translateZ(20px)" }}
-      />
-      
-      {/* Glow Bloom */}
-      <div className="absolute -inset-2 bg-[var(--accent-purple)]/0 group-hover:bg-[var(--accent-purple)]/5 blur-2xl transition-all duration-500 z-0" />
 
-      {/* Event Image */}
-      <div className="absolute inset-0 z-0">
+      {/* 1. Banner Image Section */}
+      <div className="relative h-44 overflow-hidden shrink-0">
         <motion.img 
           src={currentImageSrc} 
           alt={event.title}
           className={`w-full h-full object-cover transition-all duration-700 ${isImageLoading ? 'blur-sm scale-105' : 'blur-0 scale-100'}`}
-          style={{ transform: "translateZ(0px)" }}
           whileHover={{ scale: 1.1 }}
           transition={{ duration: 0.7 }}
         />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+        
+        {/* Badges on top of image */}
+        <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
+          <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-purple)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-purple)]/30 flex items-center gap-1.5 shadow-xl">
+            <Sparkles size={10} />
+            Verified
+          </span>
+          {event.tiers?.length > 1 && (
+            <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-teal)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-teal)]/30 shadow-xl">
+              {event.tiers.length} Tiers
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Content */}
-      <div 
-        className="absolute inset-0 z-20 p-6 flex flex-col justify-end"
-        style={{ transform: "translateZ(40px)" }}
-      >
+      {/* 2. Content Section - Separate Row Below Image */}
+      <div className="flex-1 p-5 flex flex-col justify-between bg-zinc-900/50">
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-[10px] font-black uppercase tracking-widest backdrop-blur-md border border-[var(--accent-purple)]/30 flex items-center gap-1.5">
-              <Sparkles size={10} />
-              Verified Event
-            </span>
-            {event.tiers?.length > 1 && (
-              <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[10px] font-black uppercase tracking-widest backdrop-blur-md border border-[var(--accent-teal)]/30">
-                {event.tiers.length} Tiers
-              </span>
-            )}
-          </div>
-          
-          <h3 className="text-xl font-bold leading-tight line-clamp-2 text-white drop-shadow-md">
+          <h3 className="text-lg font-black leading-tight line-clamp-1 text-white italic tracking-tight group-hover:text-[var(--accent-teal)] transition-colors">
             {event.title}
           </h3>
 
-          <div className="flex flex-col gap-1.5 text-xs text-[var(--text-secondary)] font-medium">
+          <div className="flex items-center justify-between text-[10px] font-bold text-white/70">
             <div className="flex items-center gap-2">
               <Calendar size={12} className="text-[var(--accent-teal)]" />
-              <span>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              <span className="truncate">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
             </div>
             <div className="flex items-center gap-2">
               <MapPin size={12} className="text-[var(--accent-teal)]" />
-              <span>{event.location}</span>
+              <span className="truncate max-w-[120px] text-right">{event.location}</span>
             </div>
-            {event.description && (
-              <p className="line-clamp-2 text-[10px] mt-1 text-white/60 leading-relaxed">
-                {event.description}
-              </p>
-            )}
           </div>
 
-          <div className="pt-4 border-t border-white/10">
-            <div className="flex items-center justify-between mb-4 bg-black/40 backdrop-blur-xl rounded-2xl px-4 py-3 border border-white/10 hover:border-[var(--accent-teal)]/50 transition-all duration-300 shadow-2xl group/avail">
-              <div className="flex flex-col gap-1">
-                <span className="text-[9px] text-white/50 font-black uppercase tracking-[0.2em]">Availability</span>
-                <div style={{ width: `${availability}%` }} className="h-1 w-8 bg-[var(--accent-teal)] rounded-full group-hover/avail: transition-all duration-500" />
-              </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-black text-[var(--accent-teal)] italic tracking-tighter drop-shadow-[0_0_12px_rgba(45,212,191,0.4)] transition-all">
-                  {totalSold}
-                </span>
-                <span className="text-sm font-bold text-white/30 italic">/ {totalSupply}</span>
-                <span className="text-[8px] text-white/50 font-black uppercase ml-1 tracking-widest">Sold</span>
-              </div>
-            </div>
+        </div>
 
-            <div className="flex items-center justify-between">
-              <div className="flex flex-col">
-                <span className="text-[9px] text-[var(--accent-teal)] font-black uppercase tracking-tighter opacity-70">Price From</span>
-                <span className="text-2xl font-black text-white tracking-tighter">{lowestPrice} ETH</span>
+        <div className="space-y-4 pt-4 mt-2 border-t border-white/5">
+          {/* Availability Info */}
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1 flex-1 pr-4">
+              <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest text-white/30 mb-1">
+                <span>Availability</span>
+                <span>{Math.round(availability)}%</span>
               </div>
-              <div className="flex flex-col items-end">
-                {showEtherscan ? (
-                  <a 
-                    href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/20 transition-all italic flex items-center gap-1.5"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Sparkles size={10} />
-                    Etherscan
-                  </a>
-                ) : (
-                  <motion.span 
-                    whileHover={{ scale: 1.05, backgroundColor: 'var(--accent-purple)' }}
-                    whileTap={{ scale: 0.95 }}
-                    className="px-8 py-2.5 rounded-2xl bg-[var(--accent-purple)]/80 backdrop-blur-md border border-[var(--accent-purple)]/30 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[var(--accent-purple)]/20 hover:shadow-[var(--accent-purple)]/40 transition-all italic"
-                  >
-                    Buy
-                  </motion.span>
-                )}
+              <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${availability}%` }}
+                  className="h-full bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]" 
+                />
               </div>
             </div>
+            <div className="text-right">
+              <span className="text-xs font-black text-white italic">{totalSold}/{totalSupply}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[8px] text-[var(--accent-teal)] font-black uppercase tracking-widest opacity-60">Price From</span>
+              <span className="text-xl font-black text-white tracking-tighter">{lowestPrice} ETH</span>
+            </div>
+            
+            {showEtherscan ? (
+              <a 
+                href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black uppercase text-white/60 hover:text-[var(--accent-teal)] hover:border-[var(--accent-teal)]/50 transition-all"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Etherscan
+              </a>
+
+            ) : (
+              <motion.div 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="px-6 py-2.5 rounded-xl bg-white text-black text-[10px] font-black uppercase tracking-widest shadow-xl hover:shadow-white/10 transition-all italic"
+              >
+                Buy
+              </motion.div>
+            )}
           </div>
         </div>
       </div>
+
     </motion.div>
   );
 };

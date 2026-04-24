@@ -20,11 +20,7 @@ const CONTRACT_ABI = [
   "event TicketResold(uint indexed tokenId, address indexed oldOwner, address indexed newOwner, uint priceWei)"
 ];
 
-const TIER_NAME_TO_INDEX: Record<string, number> = {
-  'Silver': 0,
-  'Gold': 1,
-  'VIP': 2
-};
+
 
 interface EventDetailModalProps {
   event: Event | null;
@@ -97,14 +93,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const tierIndices: number[] = [];
       const tierQtys: number[] = [];
       
-      event.tiers.forEach(tier => {
+      event.tiers.forEach((tier, idx) => {
         const q = getTierQuantity(tier.id);
         if (q > 0) {
-          const idx = TIER_NAME_TO_INDEX[tier.name] ?? 0;
           tierIndices.push(idx);
           tierQtys.push(q);
         }
       });
+
 
       const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
       const receipt = await tx.wait();
@@ -179,11 +175,13 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
                   <div className="absolute bottom-6 left-6">
                     <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3 inline-block">Verified Event</span>
-                    <h2 className="text-3xl font-black uppercase tracking-tight italic text-white">{event.title}</h2>
+                    <h2 className="text-3xl font-black tracking-tight italic text-white">{event.title}</h2>
+
                   </div>
                 </div>
                 <div className="p-8 space-y-8">
-                  <div className="flex flex-wrap gap-6 text-[11px] font-bold text-white/40 uppercase tracking-widest">
+                  <div className="flex flex-wrap gap-6 text-[11px] font-bold text-white/40 tracking-widest">
+
                     <span className="flex items-center gap-2"><Calendar size={14} className="text-[var(--accent-purple)]" /> {date.toLocaleDateString()}</span>
                     <span className="flex items-center gap-2"><MapPin size={14} className="text-[var(--accent-teal)]" /> {event.location}</span>
                     <span className="flex items-center gap-2"><Tag size={14} /> {event.category}</span>
@@ -204,7 +202,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                             <div key={tier.id} className={`flex flex-col p-5 rounded-2xl border transition-all ${q > 0 ? 'border-[var(--accent-purple)] bg-[var(--accent-purple)]/10 shadow-lg shadow-purple-500/10' : isSoldOut ? 'opacity-30 border-white/5' : 'border-white/10 bg-white/5'}`}>
                               <div className="flex items-center justify-between mb-4">
                                 <div>
-                                  <p className="font-black uppercase tracking-tight italic text-sm text-white">{tier.name}</p>
+                                  <p className="font-black tracking-tight italic text-sm text-white">{tier.name}</p>
+
                                   <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">{tier.sold} / {tier.supply} Sold</p>
                                 </div>
                                 <div className="text-right">
@@ -232,7 +231,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                           {resaleTickets.map((t) => (
                             <button key={t.id} onClick={() => setSelectedResaleTicket(t)} className={`flex items-center justify-between p-5 rounded-2xl border transition-all text-left ${selectedResaleTicket?.id === t.id ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 shadow-lg shadow-teal-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
                               <div>
-                                <p className="font-black uppercase tracking-tight italic text-sm text-white">{t.tierName}</p>
+                                <p className="font-black tracking-tight italic text-sm text-white">{t.tierName}</p>
+
                                 <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">Token #{t.tokenId.slice(-6)}</p>
                               </div>
                               <p className="text-sm font-black text-white">{t.resalePrice} ETH</p>

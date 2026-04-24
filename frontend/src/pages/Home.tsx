@@ -58,6 +58,57 @@ const CAPABILITIES = [
   { icon: <Globe size={20} />, title: 'Sepolia Testnet', desc: 'Deploy and test on Ethereum\'s Sepolia testnet before going live on mainnet.' },
 ];
 
+interface HomeEventCardProps {
+  event: any;
+  i: number;
+  navigate: (path: string) => void;
+}
+
+const HomeEventCard: React.FC<HomeEventCardProps> = ({ event, i, navigate }) => {
+  const { src: currentImageSrc, loading } = useIPFSImage(event.imageUrl);
+  const date = new Date(event.date);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ delay: i * 0.07 }}
+      whileHover={{ y: -4 }}
+      onClick={() => navigate('/events')}
+      className="rounded-2xl border border-white/8 bg-white/[0.02] overflow-hidden group cursor-pointer hover:border-white/20 hover:shadow-lg hover:shadow-[var(--accent-purple)]/10 transition-all"
+    >
+      <div className="h-44 bg-gradient-to-br from-[var(--accent-purple)]/20 to-[var(--accent-teal)]/10 relative overflow-hidden">
+        <img 
+          src={currentImageSrc} 
+          alt={event.title} 
+          className={`w-full h-full object-cover transition-all duration-500 ${loading ? 'opacity-40 blur-sm scale-110' : 'opacity-80 group-hover:opacity-100 group-hover:scale-105'}`}
+        />
+        <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] border border-white/10">
+          NFT
+        </div>
+      </div>
+      <div className="p-5">
+        <h3 className="font-black tracking-tight italic mb-2">{event.title}</h3>
+        <div className="flex items-center gap-1.5 text-[11px] text-white/40 font-bold mb-4">
+          <Calendar size={11} />{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          <span className="mx-1">·</span>
+          <MapPin size={11} />{event.location}
+        </div>
+        <div className="flex items-center justify-between border-t border-white/5 pt-4">
+          <div>
+            <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">From</p>
+            <p className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">{event.tiers?.length ? Math.min(...event.tiers.map((t: any) => t.price)) : 0} ETH</p>
+          </div>
+          <span className="px-4 py-2 rounded-xl bg-white/5 text-[10px] font-black uppercase tracking-widest text-white/60 group-hover:text-white group-hover:bg-white/10 transition-all">
+            Get Ticket →
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export const Home: React.FC = () => {
   const { events } = useEventStore();
   const navigate = useNavigate();
@@ -318,51 +369,9 @@ export const Home: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {activeEvents.map((event, i) => {
-              const { src: currentImageSrc, loading } = useIPFSImage(event.imageUrl);
-              const date = new Date(event.date);
-
-              return (
-                <motion.div
-                  key={event.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.07 }}
-                  whileHover={{ y: -4 }}
-                  onClick={() => navigate('/events')}
-                  className="rounded-2xl border border-white/8 bg-white/[0.02] overflow-hidden group cursor-pointer hover:border-white/20 hover:shadow-lg hover:shadow-[var(--accent-purple)]/10 transition-all"
-                >
-                  <div className="h-44 bg-gradient-to-br from-[var(--accent-purple)]/20 to-[var(--accent-teal)]/10 relative overflow-hidden">
-                    <img 
-                      src={currentImageSrc} 
-                      alt={event.title} 
-                      className={`w-full h-full object-cover transition-all duration-500 ${loading ? 'opacity-40 blur-sm scale-110' : 'opacity-80 group-hover:opacity-100 group-hover:scale-105'}`}
-                    />
-                    <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] border border-white/10">
-                      NFT
-                    </div>
-                  </div>
-                  <div className="p-5">
-                    <h3 className="font-black tracking-tight italic mb-2">{event.title}</h3>
-                    <div className="flex items-center gap-1.5 text-[11px] text-white/40 font-bold mb-4">
-                      <Calendar size={11} />{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      <span className="mx-1">·</span>
-                      <MapPin size={11} />{event.location}
-                    </div>
-                    <div className="flex items-center justify-between border-t border-white/5 pt-4">
-                      <div>
-                        <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">From</p>
-                        <p className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)]">{event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0} ETH</p>
-                      </div>
-                      <span className="px-4 py-2 rounded-xl bg-white/5 text-[10px] font-black uppercase tracking-widest text-white/60 group-hover:text-white group-hover:bg-white/10 transition-all">
-                        Get Ticket →
-                      </span>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
+            {activeEvents.map((event, i) => (
+              <HomeEventCard key={event.id} event={event} i={i} navigate={navigate} />
+            ))}
           </div>
         </section>
       )}

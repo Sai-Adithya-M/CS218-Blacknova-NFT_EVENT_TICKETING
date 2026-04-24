@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { extractCid, IPFS_GATEWAYS, FALLBACK_IMG } from '../utils/ipfs';
+import { extractCid, FALLBACK_IMG, fetchFromIPFS } from '../utils/ipfs';
 
 // In-memory cache for resolved gateway URLs
 const resolvedCache: Record<string, string> = {};
@@ -32,40 +32,30 @@ export function useIPFSImage(ipfsUrl?: string | null) {
     setLoading(true);
     let isMounted = true;
 
-    const urls = IPFS_GATEWAYS.map(gw => `${gw}/${cid}`);
-
-    // Race first 3 gateways for speed
-    const promises = urls.slice(0, 3).map(url => {
-      return new Promise<string>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(url);
-        img.onerror = () => reject(url);
-        img.src = url;
-        // 10 second timeout for image loading
-        setTimeout(() => reject(url), 10000);
-      });
-    });
-
-    Promise.any(promises)
+    fetchFromIPFS(cid, { returnUrl: true, timeout: 20000 })
       .then(fastestUrl => {
-        if (isMounted) {
+        if (isMounted && fastestUrl) {
           resolvedCache[cid] = fastestUrl;
           setSrc(fastestUrl);
           setLoading(false);
+        } else if (isMounted) {
+          // If it returns null, treat as failure
+          throw new Error('Failed to fetch image');
         }
       })
       .catch(() => {
         if (isMounted) {
-          // If all fail, we show fallback but schedule a retry
           setSrc(FALLBACK_IMG);
           setLoading(false);
           
-          // Retry in 30 seconds if it's a new image (propagation delay)
+          // Retry faster initially, then slower
+          const nextRetry = retryCount < 3 ? 5000 : 30000;
           setTimeout(() => {
             if (isMounted) setRetryCount(prev => prev + 1);
-          }, 30000);
+          }, nextRetry);
         }
       });
+
 
     return () => {
       isMounted = false;

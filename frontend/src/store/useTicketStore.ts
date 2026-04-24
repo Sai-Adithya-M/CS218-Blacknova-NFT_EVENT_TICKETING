@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ethers } from 'ethers';
 import { config } from '../config';
 import { getReadProvider } from '../utils/blockchain';
+import { fetchFromIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
@@ -12,7 +13,7 @@ const ABI = [
   "function nextTokenId() public view returns (uint256)"
 ];
 
-// Map contract tier index (0, 1, 2) to names
+// Fallback map if metadata is unreachable
 const TIER_MAP: Record<number, string> = {
   0: 'Silver',
   1: 'Gold',
@@ -100,6 +101,7 @@ export const useTicketStore = create<TicketState>((set) => ({
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
       
       const loadedTickets: Ticket[] = [];
+      const metadataCache: Record<string, any> = {};
 
       const nextTokenId = await contract.nextTokenId();
       const totalTokens = Number(nextTokenId) - 1;
@@ -113,11 +115,26 @@ export const useTicketStore = create<TicketState>((set) => ({
           const isUserOwned = userAddress && currentOwner.toLowerCase() === userAddress.toLowerCase();
 
           if (isUserOwned || isActiveListing) {
-            const eventId = await contract.tokenToEvent(i);
+            const eventIdNum = await contract.tokenToEvent(i);
             const tierIndex = await contract.tokenToTier(i);
-            const evt = await contract.fetchEventData(eventId);
+            const eventKey = eventIdNum.toString();
 
-            const tierName = TIER_MAP[Number(tierIndex)] || 'General';
+            if (!metadataCache[eventKey]) {
+              const evtData = await contract.fetchEventData(eventIdNum);
+              const hash = evtData.ipfsHash || evtData[6];
+              metadataCache[eventKey] = {
+                data: evtData,
+                metadata: hash ? await fetchFromIPFS(hash) : null
+              };
+            }
+
+            const { data: evt, metadata } = metadataCache[eventKey];
+            let tierName = TIER_MAP[Number(tierIndex)] || 'General';
+            
+            if (metadata?.tiers?.[Number(tierIndex)]) {
+              tierName = metadata.tiers[Number(tierIndex)].name;
+            }
+
             const resalePrice = isActiveListing ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined;
             const basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
 
@@ -125,7 +142,7 @@ export const useTicketStore = create<TicketState>((set) => ({
               id: `tkt_${i}`,
               tokenId: i.toString(),
               txHash: '', 
-              eventId: `evt_${eventId}`,
+              eventId: `evt_${eventIdNum}`,
               ownerId: currentOwner,
               tierName: tierName,
               tierPrice: basePrice,
@@ -146,3 +163,4 @@ export const useTicketStore = create<TicketState>((set) => ({
     }
   }
 }));
+
