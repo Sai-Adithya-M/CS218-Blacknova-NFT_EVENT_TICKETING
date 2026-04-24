@@ -2,17 +2,22 @@ import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
 
 dotenv.config();
+require("hardhat-gas-reporter");
 
 export default {
   solidity: {
     version: "0.8.28",
     settings: {
-      evmVersion: "cancun", // <-- ADD THIS LINE
+      evmVersion: "cancun",
       optimizer: {
         enabled: true,
         runs: 200,
       },
     },
+  },
+  gasReporter: {
+    enabled: true,
+    currency: "USD",
   },
   networks: {
     sepolia: {

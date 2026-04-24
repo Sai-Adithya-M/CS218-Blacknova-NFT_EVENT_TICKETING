@@ -7,8 +7,10 @@ import { fetchFromIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint)",
+  "function nextTokenId() public view returns (uint256)",
   "function fetchEventData(uint eventId) public view returns (tuple(uint256 maxTickets, uint256 priceWei, uint256 ticketsSold, address organiser, uint96 royaltyBps, bool exists, string ipfsHash))",
-  "event TicketMinted(uint indexed tokenId, uint indexed eventId, address indexed buyer, uint8 tier)"
+  "function tokenToEvent(uint256 tokenId) public view returns (uint)",
+  "function tokenToTier(uint256 tokenId) public view returns (uint8)"
 ];
 
 
@@ -40,6 +42,7 @@ export interface Event {
   hasIpfsError?: boolean;
   deploymentCost?: string; // Total gas cost in Wei
   gasUsed?: string;       // Units of gas used
+  onChainTierSales?: Record<number, number>;
 }
 
 interface EventState {
@@ -81,13 +84,21 @@ export const useEventStore = create<EventState>((set, get) => ({
           category: metadata.category || e.category,
           imageUrl: metadata.image || e.imageUrl,
           hasIpfsError: false,
-          tiers: (metadata.tiers && Array.isArray(metadata.tiers)) ? metadata.tiers.map((t: any, tidx: number) => ({
-            id: t.id || `${eventId}_tier_${tidx}`,
-            name: t.name || 'Tier',
-            price: t.price || e.tiers[0]?.price,
-            supply: t.supply || e.tiers[0]?.supply,
-            sold: tidx === 0 ? e.tiers[0]?.sold : 0
-          })) : e.tiers
+          tiers: (metadata.tiers && Array.isArray(metadata.tiers)) ? metadata.tiers.map((t: any, tidx: number) => {
+            // onChainTierSales is the source of truth for per-tier sold counts
+            // existingTier only works for tidx=0 since the initial state has 1 placeholder tier
+            const onChainSold = (e.onChainTierSales && e.onChainTierSales[tidx]) || 0;
+            
+            console.log(`EventStore: Tier "${t.name}" (idx=${tidx}) onChainSold=${onChainSold}`);
+            
+            return {
+              id: t.id || `${eventId}_tier_${tidx}`,
+              name: t.name || 'Tier',
+              price: t.price || 0,
+              supply: t.supply || 0,
+              sold: onChainSold
+            };
+          }) : e.tiers
         } : e)
       }));
     } else {
@@ -131,23 +142,43 @@ export const useEventStore = create<EventState>((set, get) => ({
         Array.from({ length: totalEvents }, (_, i) => contract.fetchEventData(i + 1))
       );
 
-      // 3. ⚡ Fetch TicketMinted events (with safety fallback)
+      // 3. ⚡ Build per-tier sales by reading token state directly from contract
+      //    The deployed contract's TicketMinted event doesn't include the tier field,
+      //    so we read tokenToEvent(id) and tokenToTier(id) for each minted token.
       const eventTierSales: Record<string, Record<number, number>> = {};
       try {
-        const mintedFilter = contract.filters.TicketMinted();
-        const fromBlock = config.deploymentBlock || 5700000; 
-        const mintedLogs = await contract.queryFilter(mintedFilter, fromBlock);
+        const nextTokenId = await contract.nextTokenId();
+        const totalTokens = Number(nextTokenId) - 1;
+        console.log(`EventStore: Reading tier data for ${totalTokens} tokens from contract state...`);
         
-        mintedLogs.forEach((log: any) => {
-          if (log.args) {
-            const eId = `evt_${log.args.eventId.toString()}`;
-            const tierIdx = Number(log.args.tier);
-            if (!eventTierSales[eId]) eventTierSales[eId] = {};
-            eventTierSales[eId][tierIdx] = (eventTierSales[eId][tierIdx] || 0) + 1;
-          }
-        });
-      } catch (logErr) {
-        console.warn("EventStore: Failed to fetch minted logs:", logErr);
+        if (totalTokens > 0) {
+          // Batch read all tokens' event and tier mappings
+          const tokenReads = Array.from({ length: totalTokens }, (_, i) => i + 1).map(async (tokenId) => {
+            try {
+              const [eventIdBN, tierIdx] = await Promise.all([
+                contract.tokenToEvent(tokenId),
+                contract.tokenToTier(tokenId)
+              ]);
+              const eId = `evt_${eventIdBN.toString()}`;
+              const tier = Number(tierIdx);
+              return { eId, tier };
+            } catch {
+              return null;
+            }
+          });
+          
+          const results = await Promise.all(tokenReads);
+          results.forEach(r => {
+            if (r) {
+              if (!eventTierSales[r.eId]) eventTierSales[r.eId] = {};
+              eventTierSales[r.eId][r.tier] = (eventTierSales[r.eId][r.tier] || 0) + 1;
+            }
+          });
+        }
+        
+        console.log("EventStore: Tier sales breakdown:", JSON.stringify(eventTierSales));
+      } catch (tierErr) {
+        console.warn("EventStore: Failed to read tier sales from contract:", tierErr);
       }
 
       const updatedEvents: Event[] = onChainData.map((evt, idx): Event | null => {
@@ -157,7 +188,7 @@ export const useEventStore = create<EventState>((set, get) => ({
         const exists = evt.exists !== undefined ? evt.exists : evt[5];
         if (!exists) return null;
 
-        const onChainTotalSold = Number(evt.ticketsSold || evt[2]);
+
         const tierSales = eventTierSales[eventId] || {};
         
         return {
@@ -166,17 +197,18 @@ export const useEventStore = create<EventState>((set, get) => ({
           description: "Loading details from IPFS...",
           date: "2099-12-31T00:00:00.000Z",
           location: "Loading location...",
-          category: "Other",
+          category: "Loading...",
           organizerId: (evt.organiser || evt[3]).toLowerCase(),
           royaltyBps: Number(evt.royaltyBps || evt[4]),
           status: 'active' as const,
           hasIpfsError: true,
+          onChainTierSales: tierSales,
           tiers: [{ 
             id: `tier_${eventId}_0`, 
-            name: 'General Access', 
+            name: 'Loading Tiers...', 
             price: parseFloat(ethers.formatEther(evt.priceWei || evt[1])), 
             supply: Number(evt.maxTickets || evt[0]), 
-            sold: tierSales[0] || onChainTotalSold 
+            sold: tierSales[0] || 0 
           }]
         };
       }).filter((e): e is Event => e !== null);

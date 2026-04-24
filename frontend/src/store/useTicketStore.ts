@@ -13,12 +13,7 @@ const ABI = [
   "function nextTokenId() public view returns (uint256)"
 ];
 
-// Fallback map if metadata is unreachable
-const TIER_MAP: Record<number, string> = {
-  0: 'Silver',
-  1: 'Gold',
-  2: 'VIP'
-};
+// Tier name fallback will be handled dynamically in the sync logic
 
 export type TicketStatus = 'active' | 'used' | 'resale';
 
@@ -124,19 +119,32 @@ export const useTicketStore = create<TicketState>((set) => ({
               const hash = evtData.ipfsHash || evtData[6];
               metadataCache[eventKey] = {
                 data: evtData,
-                metadata: hash ? await fetchFromIPFS(hash) : null
+                metadata: hash ? await fetchFromIPFS(hash, { json: true, timeout: 15000 }) : null
               };
             }
 
             const { data: evt, metadata } = metadataCache[eventKey];
-            let tierName = TIER_MAP[Number(tierIndex)] || 'General';
+            
+            // Priority for Tier Name:
+            // 1. Name from IPFS metadata (if loaded)
+            // 2. Descriptive fallback with index
+            let tierName = `Tier #${Number(tierIndex) + 1}`;
             
             if (metadata?.tiers?.[Number(tierIndex)]) {
               tierName = metadata.tiers[Number(tierIndex)].name;
+            } else if (Number(tierIndex) === 0) {
+              tierName = 'General Admission'; // Common default for index 0
             }
 
             const resalePrice = isActiveListing ? parseFloat(ethers.formatEther(listing.priceWei || listing[1])) : undefined;
-            const basePrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
+            
+            // Try to get price from metadata, fallback to on-chain base price
+            let tierPrice = parseFloat(ethers.formatEther(evt.priceWei || evt[1]));
+            if (metadata?.tiers?.[Number(tierIndex)]) {
+              tierPrice = metadata.tiers[Number(tierIndex)].price;
+            }
+            
+            console.log(`TicketStore: Token #${i} → event=${eventKey}, tier=${Number(tierIndex)}, name="${tierName}", price=${tierPrice}, metadata=${metadata ? 'loaded' : 'null'}`);
 
             loadedTickets.push({
               id: `tkt_${i}`,
@@ -145,7 +153,7 @@ export const useTicketStore = create<TicketState>((set) => ({
               eventId: `evt_${eventIdNum}`,
               ownerId: currentOwner,
               tierName: tierName,
-              tierPrice: basePrice,
+              tierPrice: tierPrice,
               status: isActiveListing ? 'resale' : 'active',
               purchasedAt: new Date().toISOString(), 
               resalePrice: resalePrice,

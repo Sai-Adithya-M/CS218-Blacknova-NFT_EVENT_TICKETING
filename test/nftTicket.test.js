@@ -15,9 +15,9 @@ describe("NFTTicket", function () {
   describe("Core Logic", function () {
     it("Buying beyond max tickets reverts", async function () {
       await contract.connect(organiser).createEvent("Small Show", 1, ONE_ETH, 1000);
-      await contract.connect(buyer).buyTicket(1, { value: ONE_ETH });
-      await expect(contract.connect(buyer2).buyTicket(1, { value: ONE_ETH }))
-        .to.be.revertedWith("Sold out");
+      await contract.connect(buyer).buyTicket(1, 1, 0, { value: ONE_ETH });
+      await expect(contract.connect(buyer2).buyTicket(1, 1, 0, { value: ONE_ETH }))
+        .to.be.revertedWith("Not enough tickets available");
     });
   });
 
@@ -25,7 +25,7 @@ describe("NFTTicket", function () {
     beforeEach(async function () {
       // 10% royalty (1000 bps)
       await contract.connect(organiser).createEvent("Concert", 10, ONE_ETH, 1000);
-      await contract.connect(buyer).buyTicket(1, { value: ONE_ETH });
+      await contract.connect(buyer).buyTicket(1, 1, 0, { value: ONE_ETH });
     });
 
     it("A non-owner cannot list a ticket for resale", async function () {

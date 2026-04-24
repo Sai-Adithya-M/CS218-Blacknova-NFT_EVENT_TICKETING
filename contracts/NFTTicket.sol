@@ -42,13 +42,17 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
 
     // --- Core Functions ---
-    function createEvent(string memory ipfsHash, uint256 maxTickets, uint256 priceWei, uint96 royaltyBps) external {
+    // GAS OPTIMIZATION: Use calldata instead of memory for string input
+    function createEvent(string calldata ipfsHash, uint256 maxTickets, uint256 priceWei, uint96 royaltyBps) external {
         require(maxTickets > 0, "Must have tickets");
         require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
         require(priceWei > 0, "Price must be greater than zero");
         require(royaltyBps <= 10000, "Royalty cannot exceed 100%");
 
-        events[nextEventId] = Event({
+        // GAS OPTIMIZATION: Cache nextEventId in a local variable before using it
+        uint256 currentEventId = nextEventId;
+
+        events[currentEventId] = Event({
             maxTickets: maxTickets,
             priceWei: priceWei,
             ticketsSold: 0,
@@ -58,35 +62,49 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
             ipfsHash: ipfsHash
         });
 
-        emit EventCreated(nextEventId, msg.sender, ipfsHash);
-        unchecked { nextEventId++; }
+        emit EventCreated(currentEventId, msg.sender, ipfsHash);
+        
+        // GAS OPTIMIZATION: Use unchecked increment for nextEventId
+        unchecked { nextEventId = currentEventId + 1; }
     }
 
     function buyTicket(uint256 eventId, uint256 quantity, uint8 tier) external payable nonReentrant {
         require(quantity > 0, "Quantity must be > 0");
         Event storage evt = events[eventId];
         require(evt.exists, "Event does not exist");
-        require(evt.ticketsSold + quantity <= evt.maxTickets, "Not enough tickets available");
-        require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
+        
+        // GAS OPTIMIZATION: Cache storage reads (avoid repeated SLOAD)
+        uint256 tSold = evt.ticketsSold;
+        require(tSold + quantity <= evt.maxTickets, "Not enough tickets available");
+        
+        // GAS OPTIMIZATION: Cache organiser
+        address organiser = evt.organiser;
+        require(msg.sender != organiser, "Organiser cannot buy their own tickets");
+        
         require(msg.value >= evt.priceWei * quantity, "Incorrect ETH amount");
         
+        // GAS OPTIMIZATION: Cache nextTokenId
+        uint256 currentTokenId = nextTokenId;
+        
         for (uint256 i = 0; i < quantity; ) {
-            uint256 tokenId = nextTokenId;
-            _safeMint(msg.sender, tokenId);
+            uint256 tokenId = currentTokenId;
+            // GAS OPTIMIZATION: Use _mint instead of _safeMint to save gas
+            _mint(msg.sender, tokenId);
             tokenToEvent[tokenId] = eventId;
             tokenToTier[tokenId] = tier;
             
             emit TicketMinted(tokenId, eventId, msg.sender, tier);
             
             unchecked { 
-                nextTokenId++;
+                currentTokenId++;
                 i++; 
             }
         }
 
-        evt.ticketsSold += quantity;
+        nextTokenId = currentTokenId;
+        evt.ticketsSold = tSold + quantity;
         
-        (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
+        (bool success, ) = payable(organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
     }
 
@@ -94,42 +112,62 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(tiers.length == quantities.length, "Mismatched input arrays");
         Event storage evt = events[eventId];
         require(evt.exists, "Event does not exist");
-        require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
+        
+        // GAS OPTIMIZATION: Cache organiser
+        address organiser = evt.organiser;
+        require(msg.sender != organiser, "Organiser cannot buy their own tickets");
 
         uint256 totalQuantity = 0;
-        for (uint256 i = 0; i < quantities.length; ) {
+        // GAS OPTIMIZATION: Cache length
+        uint256 len = quantities.length;
+        for (uint256 i = 0; i < len; ) {
             totalQuantity += quantities[i];
             unchecked { i++; }
         }
 
         require(totalQuantity > 0, "Quantity must be > 0");
-        require(evt.ticketsSold + totalQuantity <= evt.maxTickets, "Not enough tickets available");
+        
+        // GAS OPTIMIZATION: Cache ticketsSold
+        uint256 tSold = evt.ticketsSold;
+        require(tSold + totalQuantity <= evt.maxTickets, "Not enough tickets available");
+        
         require(msg.value >= evt.priceWei * totalQuantity, "Incorrect ETH amount");
 
-        for (uint256 t = 0; t < tiers.length; ) {
+        // GAS OPTIMIZATION: Cache nextTokenId
+        uint256 currentTokenId = nextTokenId;
+
+        for (uint256 t = 0; t < len; ) {
             uint256 qty = quantities[t];
             uint8 tier = tiers[t];
             
             for (uint256 i = 0; i < qty; ) {
-                uint256 tokenId = nextTokenId;
-                _safeMint(msg.sender, tokenId);
+                uint256 tokenId = currentTokenId;
+                // GAS OPTIMIZATION: Use _mint instead of _safeMint to save gas
+                _mint(msg.sender, tokenId);
                 tokenToEvent[tokenId] = eventId;
                 tokenToTier[tokenId] = tier;
                 
                 emit TicketMinted(tokenId, eventId, msg.sender, tier);
                 
                 unchecked { 
-                    nextTokenId++;
+                    currentTokenId++;
                     i++; 
                 }
             }
             unchecked { t++; }
         }
 
-        evt.ticketsSold += totalQuantity;
+        nextTokenId = currentTokenId;
+        evt.ticketsSold = tSold + totalQuantity;
         
-        (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
+        (bool success, ) = payable(organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
+    }
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        _requireOwned(tokenId);
+        uint256 eventId = tokenToEvent[tokenId];
+        return string(abi.encodePacked("ipfs://", events[eventId].ipfsHash));
     }
 
     // --- Marketplace Functions ---
@@ -147,31 +185,49 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     }
 
     function buyResaleTicket(uint256 tokenId) external payable nonReentrant {
-        ResaleListing memory listing = resaleListings[tokenId];
+        // GAS OPTIMIZATION: Replace memory struct with storage reference for resaleListings
+        ResaleListing storage listing = resaleListings[tokenId];
         require(listing.active, "Not for sale");
         
         uint256 eventId = tokenToEvent[tokenId];
-        require(msg.sender != events[eventId].organiser, "Organiser cannot buy their own tickets");
+        
+        // GAS OPTIMIZATION: Cache Event struct in storage to avoid repeated reads
+        Event storage evt = events[eventId];
+        
+        // GAS OPTIMIZATION: Cache storage reads into local variables
+        address organiser = evt.organiser;
+        require(msg.sender != organiser, "Organiser cannot buy their own tickets");
 
-        require(msg.value == listing.priceWei, "Incorrect ETH amount");
-        require(ownerOf(tokenId) == listing.seller, "Seller no longer owns ticket");
+        uint256 price = listing.priceWei;
+        require(msg.value == price, "Incorrect ETH amount");
+        
+        address seller = listing.seller;
+        require(ownerOf(tokenId) == seller, "Seller no longer owns ticket");
 
-        (address organiser, uint256 royaltyAmount) = royaltyInfo(tokenId, msg.value);
-        uint256 sellerProceeds = msg.value - royaltyAmount;
+        // GAS OPTIMIZATION: Cache royaltyBps in a local variable
+        uint96 royaltyBps = evt.royaltyBps;
+        uint256 royaltyAmount = (msg.value * uint256(royaltyBps)) / 10000;
+        
+        // GAS OPTIMIZATION: Use unchecked block for sellerProceeds subtraction
+        uint256 sellerProceeds;
+        unchecked {
+            sellerProceeds = msg.value - royaltyAmount;
+        }
 
-        delete resaleListings[tokenId]; // Prevent reentrancy
+        // GAS OPTIMIZATION: Keep delete resaleListings[tokenId] before transfers
+        delete resaleListings[tokenId]; // Prevent reentrancy and free up storage
 
-        _transfer(listing.seller, msg.sender, tokenId);
+        _transfer(seller, msg.sender, tokenId);
 
         if (royaltyAmount > 0) {
             (bool successRoyalty, ) = payable(organiser).call{value: royaltyAmount}("");
             require(successRoyalty, "Royalty transfer failed");
         }
 
-        (bool successSeller, ) = payable(listing.seller).call{value: sellerProceeds}("");
+        (bool successSeller, ) = payable(seller).call{value: sellerProceeds}("");
         require(successSeller, "Seller transfer failed");
 
-        emit TicketResold(tokenId, listing.seller, msg.sender, msg.value);
+        emit TicketResold(tokenId, seller, msg.sender, msg.value);
     }
 
     function cancelResaleListing(uint256 tokenId) external {
@@ -180,7 +236,9 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(listing.active, "No active listing");
         require(listing.seller == msg.sender, "Not the seller");
         
-        listing.active = false;
+        // GAS OPTIMIZATION: Replace setting active = false with delete resaleListings[tokenId] for gas refund
+        delete resaleListings[tokenId];
+        
         emit ListingCancelled(tokenId);
     }
 
@@ -195,7 +253,9 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
         uint256 eventId = tokenToEvent[tokenId];
-        Event memory evt = events[eventId];
+        
+        // GAS OPTIMIZATION: Use storage instead of memory
+        Event storage evt = events[eventId];
         uint256 amount = (salePrice * uint256(evt.royaltyBps)) / 10000;
         return (evt.organiser, amount);
     }

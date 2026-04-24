@@ -4,7 +4,8 @@ export const config = {
   sepoliaChainId: 11155111,
   // Using a cluster of reliable public RPC nodes
   sepoliaRpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
-  // Deployment Block updated to stay within 50k block range: 10680000
-  deploymentBlock: 5700000,
+  // Deployment Block: must be close to contract deploy block for RPC log queries to work
+  // Contract 0xAB6F71bF... was deployed around block 10710000 on Sepolia
+  deploymentBlock: 10700000,
 
 };
