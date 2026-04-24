@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol"; 
 import "@openzeppelin/contracts/interfaces/IERC2981.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
+contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     uint256 public nextEventId = 1;
     uint256 public nextTokenId = 1;
 
@@ -45,7 +44,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
     event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei);
     event ListingCancelled(uint256 indexed tokenId);
 
-    constructor() ERC721("NFTEventTicket", "NETIX") Ownable(msg.sender) {}
+    constructor() ERC721("NFTEventTicket", "NETIX") {}
 
     // --- Core Functions ---
     function createEvent(
@@ -129,13 +128,16 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
 
         // priceWei is stored in gwei; multiply by 1e9 to get wei
         require(msg.value >= uint256(evt.priceWei) * 1e9 * quantity, "Incorrect ETH amount");
-        
+
+        // Actual per-ticket price in gwei (from msg.value, not base price)
+        uint48 actualPriceGwei = uint48(msg.value / (uint256(quantity) * 1e9));
+
         for (uint256 i = 0; i < quantity; ) {
             uint256 tokenId = nextTokenId;
             _safeMint(msg.sender, tokenId);
             tokenToEvent[tokenId] = eventId;
             tokenToTier[tokenId] = tier;
-            tokenPurchasePrice[tokenId] = evt.priceWei;
+            tokenPurchasePrice[tokenId] = actualPriceGwei;
             
             emit TicketMinted(tokenId, eventId, msg.sender, tier);
             
@@ -152,8 +154,9 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         require(success, "Transfer failed");
     }
 
-    function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) external payable nonReentrant {
+    function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities, uint40[] memory pricesGwei) external payable nonReentrant {
         require(tiers.length == quantities.length, "Mismatched input arrays");
+        require(tiers.length == pricesGwei.length, "Mismatched price array");
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event does not exist");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
@@ -184,13 +187,14 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         for (uint256 t = 0; t < tiers.length; ) {
             uint24 qty = quantities[t];
             uint8 tier = tiers[t];
+            uint48 tierPrice = uint48(pricesGwei[t]);
             
             for (uint256 i = 0; i < qty; ) {
                 uint256 tokenId = nextTokenId;
                 _safeMint(msg.sender, tokenId);
                 tokenToEvent[tokenId] = eventId;
                 tokenToTier[tokenId] = tier;
-                tokenPurchasePrice[tokenId] = evt.priceWei;
+                tokenPurchasePrice[tokenId] = tierPrice;
                 
                 emit TicketMinted(tokenId, eventId, msg.sender, tier);
                 
@@ -290,7 +294,7 @@ contract NFTTicket is ERC721URIStorage, ReentrancyGuard, IERC2981, Ownable {
         return (evt.organiser, amount);
     }
 
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721URIStorage, IERC165) returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view override(ERC721, IERC165) returns (bool) {
         return interfaceId == type(IERC2981).interfaceId || super.supportsInterface(interfaceId);
     }
 }

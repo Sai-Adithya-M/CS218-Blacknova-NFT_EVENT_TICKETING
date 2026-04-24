@@ -14,7 +14,7 @@ import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
   "function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) public payable",
-  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) public payable",
+  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities, uint40[] memory pricesGwei) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
   "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei)"
@@ -102,7 +102,16 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       });
 
 
-      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
+      // Build per-tier price array in gwei for on-chain storage
+      const tierPricesGwei: bigint[] = [];
+      event.tiers.forEach((tier, idx) => {
+        const q = getTierQuantity(tier.id);
+        if (q > 0) {
+          tierPricesGwei.push(ethers.parseUnits(tier.price.toString(), "gwei"));
+        }
+      });
+
+      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, tierPricesGwei, { value: totalValue });
       const receipt = await tx.wait();
 
       const mintedIds: string[] = [];

@@ -8,7 +8,8 @@ const ABI = [
   "function nextEventId() public view returns (uint256)",
   // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
   "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
-  "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
+  // Per-tier sold/max from chain (no log queries needed)
+  "function getTierData(uint256 eventId, uint8 tier) public view returns (uint24 sold, uint24 max)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
@@ -85,15 +86,18 @@ interface EventState {
 }
 
 // Helper: merge IPFS metadata into an Event object
+// _tierSales now comes from on-chain getTierData(), not logs
 function applyMetadata(e: Event, metadata: any): Event {
   if (!metadata) return { ...e, hasIpfsError: true };
+  const tierSales = e._tierSales || {};
   const tiers = (metadata.tiers && Array.isArray(metadata.tiers) && metadata.tiers.length > 0)
     ? metadata.tiers.map((t: any, tidx: number) => ({
         id: t.id || `${e.id}_tier_${tidx}`,
         name: t.name || 'Tier',
         price: t.price ?? e.tiers[0]?.price,
         supply: t.supply ?? e.tiers[0]?.supply,
-        sold: e._tierSales?.[tidx] ?? (tidx === 0 ? e.tiers[0]?.sold ?? 0 : 0)
+        // Use on-chain per-tier sold count (fetched via getTierData)
+        sold: tierSales[tidx] ?? 0
       }))
     : e.tiers;
   return {
@@ -199,13 +203,12 @@ export const useEventStore = create<EventState>((set, get) => ({
       const contract = new ethers.Contract(config.contractAddress, ABI, provider);
       const fromBlock = config.deploymentBlock || 5700000;
 
-      // Step 1: Fetch logs + event count in parallel (no sequential waiting)
-      const [nextEventId, createdLogs, mintedLogs] = await Promise.all([
+      // Step 1: Fetch event count + EventCreated logs in parallel
+      //  (EventCreated logs give us IPFS hashes + tx hashes; no TicketMinted logs needed)
+      const [nextEventId, createdLogs] = await Promise.all([
         contract.nextEventId(),
         contract.queryFilter(contract.filters.EventCreated(), fromBlock)
           .catch(() => contract.queryFilter(contract.filters.EventCreated(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.TicketMinted(), fromBlock)
-          .catch(() => contract.queryFilter(contract.filters.TicketMinted(), -10000).catch(() => [])),
       ]);
 
       const totalEvents = Number(nextEventId) - 1;
@@ -213,7 +216,7 @@ export const useEventStore = create<EventState>((set, get) => ({
 
       if (totalEvents <= 0) { set({ events: [], isLoading: false }); return; }
 
-      // Step 2: Build lookup maps from logs
+      // Step 2: Build lookup maps from EventCreated logs
       const eventTxHashes: Record<string, string> = {};
       const eventIpfsHashes: Record<string, string> = {};
       (createdLogs as any[]).forEach((log: any) => {
@@ -224,16 +227,6 @@ export const useEventStore = create<EventState>((set, get) => ({
         }
       });
 
-      const eventTierSales: Record<string, Record<number, number>> = {};
-      (mintedLogs as any[]).forEach((log: any) => {
-        if (log.args) {
-          const eId = `evt_${log.args.eventId.toString()}`;
-          const tierIdx = Number(log.args.tier);
-          if (!eventTierSales[eId]) eventTierSales[eId] = {};
-          eventTierSales[eId][tierIdx] = (eventTierSales[eId][tierIdx] || 0) + 1;
-        }
-      });
-
       // Step 3: Fetch on-chain struct data for all events in parallel
       const onChainData = await Promise.all(
         Array.from({ length: totalEvents }, (_, i) =>
@@ -241,7 +234,32 @@ export const useEventStore = create<EventState>((set, get) => ({
         )
       );
 
-      // Step 4: Build skeleton events
+      // Step 4: Fetch per-tier sold counts from chain via getTierData()
+      // We check tiers 0, 1, 2 (Silver, Gold, VIP) for each event
+      const MAX_TIERS = 3;
+      const tierDataPromises: Promise<Record<number, { sold: number; max: number }>>[] = 
+        onChainData.map((evt, idx) => {
+          if (!evt) return Promise.resolve({});
+          const eventNum = idx + 1;
+          return Promise.all(
+            Array.from({ length: MAX_TIERS }, (_, t) =>
+              contract.getTierData(eventNum, t).then((result: any) => ({
+                tier: t,
+                sold: Number(result.sold ?? result[0]),
+                max: Number(result.max ?? result[1])
+              })).catch(() => ({ tier: t, sold: 0, max: 0 }))
+            )
+          ).then(results => {
+            const map: Record<number, { sold: number; max: number }> = {};
+            for (const r of results) {
+              map[r.tier] = { sold: r.sold, max: r.max };
+            }
+            return map;
+          });
+        });
+      const allTierData = await Promise.all(tierDataPromises);
+
+      // Step 5: Build skeleton events with on-chain tier data
       const skeletonEvents: Event[] = onChainData.map((evt, idx) => {
         if (!evt) return null;
         const i = idx + 1;
@@ -250,7 +268,12 @@ export const useEventStore = create<EventState>((set, get) => ({
         if (!organiser || organiser === "0x0000000000000000000000000000000000000000") return null;
 
         const onChainTotalSold = Number(evt.ticketsSold ?? evt[3]);
-        const tierSales = eventTierSales[eventId] || {};
+        const tierData = allTierData[idx] || {};
+        // Build _tierSales from on-chain data (sold per tier index)
+        const tierSales: Record<number, number> = {};
+        for (const [tierIdx, data] of Object.entries(tierData)) {
+          tierSales[Number(tierIdx)] = data.sold;
+        }
 
         return {
           id: eventId,
@@ -266,10 +289,9 @@ export const useEventStore = create<EventState>((set, get) => ({
           tiers: [{
             id: `tier_${eventId}_0`,
             name: 'General Access',
-            // priceWei is stored as gwei in the contract (uint40); convert to ETH
             price: parseFloat(ethers.formatUnits(evt.priceWei ?? evt[1], "gwei")),
             supply: Number(evt.maxTickets ?? evt[2]),
-            sold: tierSales[0] ?? onChainTotalSold
+            sold: onChainTotalSold
           }],
           txHash: eventTxHashes[eventId],
           _tierSales: tierSales,

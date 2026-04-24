@@ -203,7 +203,7 @@ describe("NFTTicket", function () {
 
       const tx = await contract
         .connect(buyer)
-        .buyBatchTickets(1, tiers, quantities, {
+        .buyBatchTickets(1, tiers, quantities, [ONE_ETH_GWEI, ONE_ETH_GWEI], {
           value: ONE_ETH_WEI * BigInt(totalQty),
         });
       const receipt = await tx.wait();
@@ -225,7 +225,7 @@ describe("NFTTicket", function () {
       await expect(
         contract
           .connect(buyer)
-          .buyBatchTickets(1, [TIER_GOLD], [21], { value: ONE_ETH_WEI * 21n })
+          .buyBatchTickets(1, [TIER_GOLD], [21], [ONE_ETH_GWEI], { value: ONE_ETH_WEI * 21n })
       ).to.be.revertedWith("Tier sold out");
     });
   });
