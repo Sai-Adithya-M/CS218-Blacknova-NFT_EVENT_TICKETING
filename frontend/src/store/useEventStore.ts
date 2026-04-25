@@ -120,8 +120,24 @@ function applyMetadata(e: Event, metadata: any): Event {
         // On-chain supply (from getTierData max) takes priority over IPFS
         const onChainMax = tierMaxSupplies[tidx];
         const supply = (onChainMax !== undefined && onChainMax > 0) ? onChainMax : (t.supply ?? e.tiers[0]?.supply);
-        // localStorage price override > IPFS price > skeleton fallback
-        const price = priceOverrides?.[tidx] ?? t.price ?? e.tiers[0]?.price;
+        // localStorage price override > On-chain base price (for tier 0) > IPFS price
+        let price = priceOverrides?.[tidx];
+        if (price === undefined) {
+          const onChainBase = e.tiers[0]?.price;
+          const ipfsBase = metadata.tiers[0]?.price;
+          
+          if (tidx === 0 && onChainBase !== undefined) {
+            price = onChainBase; // Blockchain is source of truth for base price
+          } else if (onChainBase !== undefined && ipfsBase !== undefined && onChainBase !== ipfsBase && t.price !== undefined) {
+            // Apply the same price offset to higher tiers
+            price = Math.max(0.0001, t.price + (onChainBase - ipfsBase));
+          } else {
+            price = t.price ?? onChainBase;
+          }
+        }
+        
+        // Fix floating point precision issues (e.g., 0.0050000000000004 -> 0.005)
+        price = Number(Number(price).toFixed(6));
         return {
           id: t.id || `${e.id}_tier_${tidx}`,
           name: t.name || 'Tier',
