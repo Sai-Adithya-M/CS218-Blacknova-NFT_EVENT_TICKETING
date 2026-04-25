@@ -26,7 +26,9 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     struct TokenData {
         uint64 eventId;
         uint8  tier;
-        uint48 purchasePrice; // gwei
+        uint48 originalPrice; // gwei, used for 10% resale cap
+        uint48 lastPricePaid; // gwei, used for exact refunds
+        bool   refunded;      // NEW: 1 byte, fits in existing slot (22 bytes total)
     }
 
     struct ResaleListing {
@@ -38,6 +40,20 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     mapping(uint256 => Event) public events;
     mapping(uint256 => TokenData) internal _tokenData; // packed: 1 SSTORE instead of 3
     mapping(uint256 => ResaleListing) public resaleListings;
+    
+    // NEW: gas efficient mapping for cancellation status
+    mapping(uint256 => bool) public isCancelled;
+    
+    // NEW: Liability tracker for exact refunds
+    mapping(uint256 => uint256) public eventRefundLiability;
+
+    // NEW: Custom errors for gas efficiency
+    error EventIsCancelled();
+    error NotEventOrganiser();
+    error NotTicketOwner();
+    error AlreadyRefunded();
+    error RefundFailed();
+    error InsufficientRefundFunds();
 
     // ── Per-tier tracking (uint24 matches maxTickets/ticketsSold size) ───
     mapping(uint256 => mapping(uint8 => uint24)) public tierTicketsSold;
@@ -49,6 +65,10 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     event TicketListed(uint256 indexed tokenId, address indexed seller, uint48 priceWei);
     event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei);
     event ListingCancelled(uint256 indexed tokenId);
+    
+    // NEW
+    event EventCancelled(uint256 indexed eventId);
+    event RefundClaimed(uint256 indexed tokenId, address indexed user, uint256 amount);
 
     constructor() ERC721("NFTEventTicket", "NETIX") {}
 
@@ -116,6 +136,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
     function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) external payable nonReentrant {
         require(quantity > 0, "Quantity must be > 0");
+        if (isCancelled[eventId]) revert EventIsCancelled(); // MODIFIED
+
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event does not exist");
         require(evt.ticketsSold + quantity <= evt.maxTickets, "Not enough tickets available");
@@ -135,7 +157,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         for (uint256 i = 0; i < quantity; ) {
             uint256 tokenId = nextTokenId;
             _mint(msg.sender, tokenId); // _mint not _safeMint — saves ~2.5K gas/token
-            _tokenData[tokenId] = TokenData(eid, tier, actualPriceGwei); // 1 SSTORE instead of 3
+            _tokenData[tokenId] = TokenData(eid, tier, actualPriceGwei, actualPriceGwei, false); // MODIFIED (added false)
 
             emit TicketMinted(tokenId, eventId, msg.sender, tier);
 
@@ -148,6 +170,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         evt.ticketsSold += quantity;
         tierTicketsSold[eventId][tier] += quantity;
         
+        eventRefundLiability[eventId] += msg.value; // Track exact liability
+        
         (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
     }
@@ -155,6 +179,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities, uint40[] memory pricesGwei) external payable nonReentrant {
         require(tiers.length == quantities.length, "Mismatched input arrays");
         require(tiers.length == pricesGwei.length, "Mismatched price array");
+        if (isCancelled[eventId]) revert EventIsCancelled(); // MODIFIED
+
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event does not exist");
         require(msg.sender != evt.organiser, "Organiser cannot buy their own tickets");
@@ -188,7 +214,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             for (uint256 i = 0; i < qty; ) {
                 uint256 tokenId = nextTokenId;
                 _mint(msg.sender, tokenId);
-                _tokenData[tokenId] = TokenData(eid, tier, tierPrice);
+                _tokenData[tokenId] = TokenData(eid, tier, tierPrice, tierPrice, false); // MODIFIED (added false)
 
                 emit TicketMinted(tokenId, eventId, msg.sender, tier);
 
@@ -204,14 +230,21 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
         evt.ticketsSold += totalQuantity;
         
+        eventRefundLiability[eventId] += msg.value; // Track exact liability
+        
         (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
     }
 
     // --- Marketplace Functions ---
     function listForResale(uint256 tokenId, uint48 priceWei) external {
+        if (isCancelled[_tokenData[tokenId].eventId]) revert EventIsCancelled(); // MODIFIED
+
         require(ownerOf(tokenId) == msg.sender, "Not the owner");
         require(priceWei > 0, "Price must be > 0");
+
+        uint48 originalPrice = _tokenData[tokenId].originalPrice;
+        require(priceWei <= originalPrice + (originalPrice / 10), "Price exceeds 110% of original");
 
         resaleListings[tokenId] = ResaleListing({
             seller: msg.sender,
@@ -227,6 +260,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         require(listing.active, "Not for sale");
         
         uint256 eventId = uint256(_tokenData[tokenId].eventId);
+        if (isCancelled[eventId]) revert EventIsCancelled(); // MODIFIED
+        
         Event storage evtResale = events[eventId];
         require(evtResale.organiser != address(0), "Event does not exist");
         require(msg.sender != evtResale.organiser, "Organiser cannot buy their own tickets");
@@ -248,7 +283,11 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         require(successSeller, "Seller transfer failed");
 
         _transfer(listing.seller, msg.sender, tokenId);
-        _tokenData[tokenId].purchasePrice = listing.priceWei; // warm slot — cheap
+        
+        uint256 oldPriceWei = uint256(_tokenData[tokenId].lastPricePaid) * 1e9;
+        _tokenData[tokenId].lastPricePaid = listing.priceWei;
+        
+        eventRefundLiability[eventId] = eventRefundLiability[eventId] - oldPriceWei + msg.value;
 
         emit TicketResold(tokenId, listing.seller, msg.sender, listing.priceWei);
     }
@@ -263,6 +302,39 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit ListingCancelled(tokenId);
     }
 
+    // --- NEW: Cancellation & Refund Functions ---
+
+    function cancelEvent(uint256 eventId) external payable {
+        Event storage evt = events[eventId];
+        if (msg.sender != evt.organiser) revert NotEventOrganiser();
+        if (isCancelled[eventId]) revert EventIsCancelled();
+        if (msg.value < eventRefundLiability[eventId]) revert InsufficientRefundFunds();
+
+        isCancelled[eventId] = true;
+        emit EventCancelled(eventId);
+    }
+
+    function claimRefund(uint256 tokenId) external nonReentrant {
+        if (ownerOf(tokenId) != msg.sender) revert NotTicketOwner();
+        
+        TokenData storage tData = _tokenData[tokenId];
+        // Cannot claim if event is not cancelled. If cancelled, isCancelled is true.
+        // Wait, if it's NOT cancelled, we should revert. 
+        if (!isCancelled[tData.eventId]) revert EventIsCancelled(); // Misnomer for "NotCancelled", but gas efficient to reuse
+        if (tData.refunded) revert AlreadyRefunded();
+
+        // CEI Pattern: Update state before external call
+        tData.refunded = true; 
+
+        // Refund = last price paid * 1e9 to get back to wei
+        uint256 refundAmount = uint256(tData.lastPricePaid) * 1e9;
+        
+        (bool success, ) = payable(msg.sender).call{value: refundAmount}("");
+        if (!success) revert RefundFailed();
+
+        emit RefundClaimed(tokenId, msg.sender, refundAmount);
+    }
+
     // --- View & Standards (backward-compatible getters) ---
     function tokenToEvent(uint256 tokenId) public view returns (uint256) {
         return uint256(_tokenData[tokenId].eventId);
@@ -272,8 +344,16 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         return _tokenData[tokenId].tier;
     }
 
-    function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48) {
-        return _tokenData[tokenId].purchasePrice;
+    function getTokenOriginalPrice(uint256 tokenId) public view returns (uint48) {
+        return _tokenData[tokenId].originalPrice;
+    }
+
+    function getTokenLastPricePaid(uint256 tokenId) public view returns (uint48) {
+        return _tokenData[tokenId].lastPricePaid;
+    }
+
+    function isTokenRefunded(uint256 tokenId) public view returns (bool) {
+        return _tokenData[tokenId].refunded;
     }
 
     function fetchEventData(uint256 eventId) public view returns (Event memory) {

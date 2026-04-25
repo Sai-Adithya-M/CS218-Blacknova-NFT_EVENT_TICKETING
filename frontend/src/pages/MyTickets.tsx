@@ -39,11 +39,12 @@ const BannerImage: React.FC<{ src?: string; alt: string; className?: string }> =
 
 const CONTRACT_ABI = [
   "function listForResale(uint256 tokenId, uint48 priceWei) external",
-  "function cancelResaleListing(uint256 tokenId) external"
+  "function cancelResaleListing(uint256 tokenId) external",
+  "function claimRefund(uint256 tokenId) external"
 ];
 
 export const MyTickets: React.FC = () => {
-  const { tickets, isLoading: isTicketsLoading, listTicketForResale, cancelResale } = useTicketStore();
+  const { tickets, isLoading: isTicketsLoading, listTicketForResale, cancelResale, markTicketRefunded } = useTicketStore();
   const { events, isLoading: isEventsLoading } = useEventStore();
   const { user } = useAuthStore();
   const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
@@ -66,6 +67,12 @@ export const MyTickets: React.FC = () => {
     if (!priceStr) return;
     const price = parseFloat(priceStr);
     if (isNaN(price) || price <= 0) { alert("Invalid price."); return; }
+
+    const maxPrice = ticket.tierPrice * 1.1;
+    if (price > maxPrice) {
+      alert(`Resale price cannot exceed 10% more than the original event price (${maxPrice.toFixed(4)} ETH).`);
+      return;
+    }
     setProcessingId(ticket.id);
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
@@ -98,6 +105,23 @@ export const MyTickets: React.FC = () => {
     } catch (err: any) {
       console.error("Cancellation failed:", err);
       alert(err.message || "Failed to cancel listing.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleClaimRefund = async (ticket: any) => {
+    setProcessingId(ticket.id);
+    try {
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
+      const tx = await contract.claimRefund(ticket.tokenId);
+      await tx.wait();
+      markTicketRefunded(ticket.id);
+    } catch (err: any) {
+      console.error("Claim refund failed:", err);
+      alert(err.message || "Failed to claim refund.");
     } finally {
       setProcessingId(null);
     }
@@ -314,7 +338,7 @@ export const MyTickets: React.FC = () => {
                               <ExternalLink size={12} /> Etherscan
                             </a>
 
-                            {!isPast && ticket.status === 'active' && (
+                            {!isPast && event?.status !== 'cancelled' && ticket.status === 'active' && (
                               <button
                                 onClick={() => setActiveResaleId(ticket.id)}
                                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-panel border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all italic"
@@ -323,7 +347,7 @@ export const MyTickets: React.FC = () => {
                               </button>
                             )}
 
-                            {!isPast && ticket.status === 'resale' && (
+                            {!isPast && event?.status !== 'cancelled' && ticket.status === 'resale' && (
                               <button
                                 onClick={() => handleCancelResale(ticket)}
                                 disabled={processingId === ticket.id}
@@ -332,6 +356,23 @@ export const MyTickets: React.FC = () => {
                                 {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
                                 {processingId === ticket.id ? 'Cancelling...' : 'Cancel'}
                               </button>
+                            )}
+
+                            {event?.status === 'cancelled' && !ticket.isRefunded && (
+                              <button
+                                onClick={() => handleClaimRefund(ticket)}
+                                disabled={processingId === ticket.id}
+                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[9px] font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all italic disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : null}
+                                {processingId === ticket.id ? 'Claiming...' : 'Claim Refund'}
+                              </button>
+                            )}
+
+                            {event?.status === 'cancelled' && ticket.isRefunded && (
+                              <span className="flex items-center px-4 py-2.5 rounded-xl bg-[var(--status-success)]/10 text-[var(--status-success)] text-[9px] font-black uppercase tracking-widest italic border border-[var(--status-success)]/20">
+                                Refunded
+                              </span>
                             )}
                           </div>
                         )}

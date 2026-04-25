@@ -263,6 +263,42 @@ export const ManageEvents: React.FC = () => {
     }
   };
 
+  const handleCancelEvent = async (event: any) => {
+    if (!confirm("Are you SURE you want to cancel this event? You must deposit ETH to cover refunds. This action cannot be undone.")) return;
+
+    setIsMining(true);
+    try {
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(config.contractAddress, [
+        "function cancelEvent(uint256 eventId) external payable",
+        "function eventRefundLiability(uint256) public view returns (uint256)"
+      ], signer);
+      
+      const eventIdNum = event.id.replace('evt_', '');
+      
+      // Automatically fetch the exact liability from the smart contract!
+      const requiredLiabilityWei = await contract.eventRefundLiability(eventIdNum);
+      const requiredEth = ethers.formatEther(requiredLiabilityWei);
+      
+      if (!confirm(`The exact total refund liability for this event is ${requiredEth} ETH. Proceed to deposit and cancel?`)) {
+        setIsMining(false);
+        return;
+      }
+      
+      const tx = await contract.cancelEvent(eventIdNum, { value: requiredLiabilityWei });
+      await tx.wait();
+      
+      alert("Event Cancelled successfully! Refunds are now active.");
+      window.location.reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to cancel event");
+    } finally {
+      setIsMining(false);
+    }
+  };
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
@@ -642,13 +678,27 @@ export const ManageEvents: React.FC = () => {
                   .map(event => (
                     <div key={event.id} className="space-y-4">
                       <EventCard event={event} showEtherscan={true} />
-                      {manageTab === 'active' && (
-                        <button
-                          onClick={() => setEditingEventId(event.id)}
-                          className="w-full mt-2 py-3 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[10px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/20 transition-all flex justify-center items-center gap-2"
-                        >
-                          Edit Event Details
-                        </button>
+                      {manageTab === 'active' && event.status !== 'cancelled' && (
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <button
+                            onClick={() => setEditingEventId(event.id)}
+                            className="w-full py-3 rounded-xl bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[10px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/20 transition-all flex justify-center items-center gap-2"
+                          >
+                            Edit Details
+                          </button>
+                          <button
+                            onClick={() => handleCancelEvent(event)}
+                            className="w-full py-3 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] font-black uppercase tracking-widest hover:bg-orange-500/20 transition-all flex justify-center items-center gap-2"
+                          >
+                            Cancel Event
+                          </button>
+                        </div>
+                      )}
+                      
+                      {event.status === 'cancelled' && (
+                        <div className="w-full mt-2 py-3 rounded-xl bg-orange-500/5 border border-orange-500/20 text-orange-500/80 text-[10px] font-black uppercase tracking-widest flex justify-center items-center gap-2">
+                          <Ban size={14} /> Cancelled
+                        </div>
                       )}
                       <div className="grid grid-cols-1 gap-4">
                           <button

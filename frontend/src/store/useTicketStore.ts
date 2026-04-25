@@ -11,7 +11,9 @@ const ABI = [
   // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
   "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
   "function getResaleListing(uint256 tokenId) public view returns (tuple(address seller, uint48 priceWei, bool active))",
-  "function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48)",
+  "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint48)",
+  "function getTokenLastPricePaid(uint256 tokenId) public view returns (uint48)",
+  "function isTokenRefunded(uint256 tokenId) public view returns (bool)",
   "function nextTokenId() public view returns (uint256)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
@@ -43,6 +45,7 @@ export interface Ticket {
   qrCode?: string;
   resalePrice?: number;
   resaleLink?: string;
+  isRefunded?: boolean;
 }
 
 interface TicketState {
@@ -52,6 +55,7 @@ interface TicketState {
   listTicketForResale: (ticketId: string, price: number) => void;
   buyResaleTicket: (ticketId: string, newOwnerId: string, pricePaid: number) => void;
   cancelResale: (ticketId: string) => void;
+  markTicketRefunded: (ticketId: string) => void;
   fetchTicketsFromChain: (userAddress?: string) => Promise<void>;
 }
 
@@ -94,6 +98,12 @@ export const useTicketStore = create<TicketState>((set) => ({
   cancelResale: (ticketId) => set((state) => ({
     tickets: state.tickets.map(t =>
       t.id === ticketId ? { ...t, status: 'active' as TicketStatus, resalePrice: undefined, resaleLink: undefined } : t
+    )
+  })),
+
+  markTicketRefunded: (ticketId) => set((state) => ({
+    tickets: state.tickets.map(t =>
+      t.id === ticketId ? { ...t, isRefunded: true } : t
     )
   })),
 
@@ -197,16 +207,21 @@ export const useTicketStore = create<TicketState>((set) => ({
         } catch (e) {}
       }));
 
-      // Fetch actual purchase prices from chain for all relevant tokens
+      // Fetch actual purchase prices & refund status from chain for all relevant tokens
       const purchasePrices: Record<string, number> = {};
+      const refundStatuses: Record<string, boolean> = {};
       await Promise.all(
         relevantTokens.map(async (tId) => {
           try {
-            const priceGwei = await contract.getTokenPurchasePrice(tId);
+            const [priceGwei, isRefunded] = await Promise.all([
+              contract.getTokenLastPricePaid(tId).catch(() => 0),
+              contract.isTokenRefunded(tId).catch(() => false)
+            ]);
             const priceEth = parseFloat(ethers.formatUnits(priceGwei, "gwei"));
             if (priceEth > 0) {
               purchasePrices[tId] = priceEth;
             }
+            refundStatuses[tId] = isRefunded;
           } catch {}
         })
       );
@@ -250,6 +265,7 @@ export const useTicketStore = create<TicketState>((set) => ({
           status: isActiveListing ? 'resale' : 'active',
           purchasedAt: new Date().toISOString(), 
           resalePrice: resalePrice,
+          isRefunded: refundStatuses[tId] || false,
         });
       });
 
