@@ -20,7 +20,7 @@ export const ResaleModal: React.FC<ResaleModalProps> = ({
   const royalty = event?.royaltyBps || 0;
   const marginCap = 10;
   const totalCapPercent = royalty + marginCap;
-  const maxPrice = ticket.tierPrice * (1 + totalCapPercent / 100);
+  const maxPrice = ticket ? (ticket.tierPrice * (1 + totalCapPercent / 100)) : 0;
 
   useEffect(() => {
     if (isOpen) {
@@ -72,7 +72,7 @@ export const ResaleModal: React.FC<ResaleModalProps> = ({
                 <div className="flex items-center gap-2 mt-1">
                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent-teal)] animate-pulse" />
                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40 italic">
-                     Token ID #{ticket.tokenId}
+                     Token ID #{ticket?.tokenId}
                    </p>
                 </div>
               </div>
@@ -96,9 +96,9 @@ export const ResaleModal: React.FC<ResaleModalProps> = ({
                 </h4>
                 <div className="flex justify-between items-end">
                    <div>
-                      <p className="text-xl font-black text-white italic">{ticket.tierName} TIER</p>
+                      <p className="text-xl font-black text-white italic">{ticket?.tierName} TIER</p>
                       <p className="text-[9px] font-bold text-white/30 uppercase mt-1">
-                        Original: {ticket.tierPrice} ETH
+                        Original: {ticket?.tierPrice} ETH
                       </p>
                    </div>
                    <div className="text-right">
