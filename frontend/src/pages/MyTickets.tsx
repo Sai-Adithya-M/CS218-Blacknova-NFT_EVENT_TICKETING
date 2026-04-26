@@ -1,9 +1,11 @@
 import React from 'react';
+import { toast } from 'react-hot-toast';
 import { useTicketStore } from '../store/useTicketStore';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, Loader2 } from 'lucide-react';
+import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, Loader2, ShieldCheck, Users } from 'lucide-react';
 import { AuthFallback } from '../components/ui/AuthFallback';
+import { ResaleModal } from '../components/events/ResaleModal';
 import { motion } from 'framer-motion';
 import { ethers } from 'ethers';
 import { config } from '../config';
@@ -38,7 +40,7 @@ const BannerImage: React.FC<{ src?: string; alt: string; className?: string }> =
 };
 
 const CONTRACT_ABI = [
-  "function listForResale(uint256 tokenId, uint48 priceWei) external",
+  "function listForResale(uint256 tokenId, uint256 priceWei) external",
   "function cancelResaleListing(uint256 tokenId) external",
   "function claimRefund(uint256 tokenId) external"
 ];
@@ -47,10 +49,33 @@ export const MyTickets: React.FC = () => {
   const { tickets, isLoading: isTicketsLoading, listTicketForResale, cancelResale, markTicketRefunded } = useTicketStore();
   const { events, isLoading: isEventsLoading } = useEventStore();
   const { user } = useAuthStore();
-  const [resaleInputs, setResaleInputs] = React.useState<Record<string, string>>({});
-  const [activeResaleId, setActiveResaleId] = React.useState<string | null>(null);
+  const [selectedTicketForResale, setSelectedTicketForResale] = React.useState<any | null>(null);
+  const [isResaleModalOpen, setIsResaleModalOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<'active' | 'history'>('active');
   const [processingId, setProcessingId] = React.useState<string | null>(null);
+  const [secureQRs, setSecureQRs] = React.useState<Record<string, { data: string; expiresAt: number }>>({});
+  const [, setTick] = React.useState(0);
+  
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setTick(t => t + 1);
+      // Clean up expired QRs
+      setSecureQRs(prev => {
+        const next = { ...prev };
+        let changed = false;
+        const now = Math.floor(Date.now() / 1000);
+        Object.keys(next).forEach(id => {
+          if (next[id].expiresAt < now) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }, 30000); // Check every 30s
+    return () => clearInterval(timer);
+  }, []);
+  const [isGeneratingQR, setIsGeneratingQR] = React.useState<string | null>(null);
 
   if (!user) return <AuthFallback />;
 
@@ -59,35 +84,30 @@ export const MyTickets: React.FC = () => {
   const filteredTickets = myTickets.filter(ticket => {
     const event = events.find(e => e.id === ticket.eventId);
     const isPast = event ? new Date(event.date) < new Date() : false;
-    return activeTab === 'active' ? !isPast : isPast;
+    const isHistory = isPast || ticket.isRefunded;
+    return activeTab === 'active' ? !isHistory : isHistory;
   });
 
-  const handleResale = async (ticket: any) => {
-    const priceStr = resaleInputs[ticket.id];
-    if (!priceStr) return;
-    const price = parseFloat(priceStr);
-    if (isNaN(price) || price <= 0) { alert("Invalid price."); return; }
-
-    const maxPrice = ticket.tierPrice * 1.1;
-    if (price > maxPrice) {
-      alert(`Resale price cannot exceed 10% more than the original event price (${maxPrice.toFixed(4)} ETH).`);
-      return;
-    }
+  const handleResale = async (ticket: any, price: number) => {
     setProcessingId(ticket.id);
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
-      // Contract stores resale price in gwei (uint48 max ~281,474 ETH)
-      const priceWei = ethers.parseUnits(price.toString(), "gwei");
+      // Contract stores resale price in wei
+      const priceWei = ethers.parseUnits(price.toString(), "ether");
       const tx = await contract.listForResale(ticket.tokenId, priceWei);
       await tx.wait();
       listTicketForResale(ticket.id, price);
-      setActiveResaleId(null);
-      setResaleInputs(prev => { const next = { ...prev }; delete next[ticket.id]; return next; });
+      setIsResaleModalOpen(false);
+      toast.success("Ticket listed for resale successfully!");
     } catch (err: any) {
       console.error("Resale listing failed:", err);
-      alert(err.message || "Failed to list for resale.");
+      if (err.code === 4001 || err.message?.toLowerCase().includes("user rejected")) {
+        toast.error("Transaction cancelled in MetaMask.");
+      } else {
+        toast.error(err.reason || err.message || "Failed to list for resale.");
+      }
     } finally {
       setProcessingId(null);
     }
@@ -104,9 +124,58 @@ export const MyTickets: React.FC = () => {
       cancelResale(ticket.id);
     } catch (err: any) {
       console.error("Cancellation failed:", err);
-      alert(err.message || "Failed to cancel listing.");
+      toast.error(err.message || "Failed to cancel listing.");
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const generateSecureQR = async (ticket: any) => {
+    setIsGeneratingQR(ticket.id);
+    try {
+      if (!(window as any).ethereum) throw new Error("Wallet not connected");
+      
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(config.contractAddress, [
+        "function getTokenNonce(uint256 tokenId) public view returns (uint256)"
+      ], provider);
+
+      // Ensure tokenId is a clean numeric string or BigInt
+      const cleanTokenId = ticket.tokenId.toString().replace(/\D/g, '');
+      console.log("Fetching nonce for Token ID:", cleanTokenId);
+      
+      const nonce = await contract.getTokenNonce(BigInt(cleanTokenId));
+      const owner = await signer.getAddress();
+      const timestamp = Math.floor(Date.now() / 1000);
+      
+      const message = `Authorize Entry\nToken ID: ${cleanTokenId}\nEvent ID: ${ticket.eventId}\nNonce: ${nonce.toString()}\nTimestamp: ${timestamp}`;
+      console.log("Signing message:", message);
+      
+      const signature = await signer.signMessage(message);
+
+      const qrData = JSON.stringify({
+        t: cleanTokenId,
+        e: ticket.eventId,
+        o: owner,
+        n: nonce.toString(),
+        ts: timestamp,
+        s: signature
+      });
+
+      setSecureQRs(prev => ({ 
+        ...prev, 
+        [ticket.id]: {
+          data: qrData,
+          expiresAt: timestamp + 300 // 5 minutes
+        }
+      }));
+    } catch (err: any) {
+      console.error("Detailed QR Error:", err);
+      const msg = err.reason || err.message || "Unknown error";
+      toast.error(`Failed to generate secure QR: ${msg}`);
+    } finally {
+      setIsGeneratingQR(null);
     }
   };
 
@@ -121,7 +190,7 @@ export const MyTickets: React.FC = () => {
       markTicketRefunded(ticket.id);
     } catch (err: any) {
       console.error("Claim refund failed:", err);
-      alert(err.message || "Failed to claim refund.");
+      toast.error(err.message || "Failed to claim refund.");
     } finally {
       setProcessingId(null);
     }
@@ -194,7 +263,7 @@ export const MyTickets: React.FC = () => {
             const eventTitle = event?.title || 'Unknown Event';
             const eventDate = event ? new Date(event.date) : null;
             const isPast = eventDate ? eventDate < new Date() : false;
-            const eventLocation = event?.location || '';
+            const eventLocation = event?.venueName ? `${event.venueName}, ${event.location}` : (event?.location || '');
             const purchaseDate = new Date(ticket.purchasedAt);
 
             return (
@@ -226,20 +295,27 @@ export const MyTickets: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-3 mb-2">
                         <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest italic ${
-                          isPast
+                          event?.status === 'cancelled'
+                            ? 'bg-red-500/10 text-red-500'
+                          : isPast
                             ? 'bg-white/5 text-white/40'
                             : ticket.status === 'active'
                             ? 'bg-[var(--status-success)]/10 text-[var(--status-success)]'
                             : 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                         }`}>
-                          {isPast ? 'Past' : ticket.status}
+                          {event?.status === 'cancelled' ? 'Cancelled' : isPast ? 'Past' : ticket.status}
                         </span>
                         <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-purple)]/10 text-[var(--accent-purple)] text-[8px] font-black uppercase tracking-widest">
                           <Tag size={8} />{ticket.tierName}
                         </span>
                       </div>
 
-                      <h3 className="text-xl font-black tracking-tight italic mb-3">{eventTitle}</h3>
+                      <h3 className="text-xl font-black tracking-tight italic mb-1">{eventTitle}</h3>
+                      {event?.status === 'cancelled' && (
+                        <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                          <Ban size={10} /> This event has been cancelled
+                        </p>
+                      )}
 
                       <div className="flex items-center gap-2 mb-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
                         <Hash size={12} className="text-[var(--accent-teal)] shrink-0" />
@@ -264,17 +340,63 @@ export const MyTickets: React.FC = () => {
                           <Clock size={11} />
                           Purchased {purchaseDate.toLocaleDateString()}
                         </span>
+                        {event?.locationLink && (
+                          <a 
+                            href={event.locationLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-[var(--accent-teal)] hover:text-white transition-colors bg-[var(--accent-teal)]/5 px-2 py-0.5 rounded-md border border-[var(--accent-teal)]/10"
+                          >
+                            <ExternalLink size={10} /> Directions
+                          </a>
+                        )}
+                        {event?.minAge && (
+                          <span className="flex items-center gap-1.5 text-orange-400/80">
+                            <Users size={11} />
+                            Age: {event.minAge}
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     {/* Price + QR + actions */}
                     <div className="flex flex-col items-end gap-3 shrink-0">
-                      <div className="w-24 h-24 bg-white p-2 mb-2 rounded-xl shadow-[0_0_15px_rgba(var(--accent-teal),0.2)]">
-                        <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`)}`}
-                          alt="Ticket Gate QR Code"
-                          className="w-full h-full object-contain"
-                        />
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="relative w-28 h-28 bg-white p-2 rounded-xl shadow-[0_0_20px_rgba(var(--accent-teal),0.3)] overflow-hidden group/qr">
+                          {secureQRs[ticket.id] ? (
+                            <img
+                              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(secureQRs[ticket.id].data)}`}
+                              alt="Secure Ticket QR"
+                              className={`w-full h-full object-contain ${event?.status === 'cancelled' ? 'opacity-10 grayscale' : ''}`}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-black/5 gap-2 text-center p-2">
+                               <div className="w-8 h-8 rounded-full bg-[var(--accent-teal)]/10 flex items-center justify-center">
+                                  <ShieldCheck size={16} className="text-[var(--accent-teal)]" />
+                               </div>
+                               <button 
+                                  onClick={() => generateSecureQR(ticket)}
+                                  disabled={isGeneratingQR === ticket.id || event?.status === 'cancelled' || ticket.status === 'resale'}
+                                  className="text-[8px] font-black uppercase tracking-widest text-[var(--accent-teal)] hover:underline disabled:opacity-30"
+                               >
+                                  {isGeneratingQR === ticket.id ? 'Signing...' : 
+                                   ticket.status === 'resale' ? 'Listed for Resale' : 'Tap to Generate Secure QR'}
+                               </button>
+                            </div>
+                          )}
+                          
+                          {event?.status === 'cancelled' && (
+                            <div className="absolute inset-0 flex items-center justify-center -rotate-12">
+                               <span className="text-[10px] font-black text-red-600 border-2 border-red-600 px-1 py-0.5 rounded uppercase tracking-tighter bg-white shadow-xl">Invalid</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {secureQRs[ticket.id] && (
+                           <div className="bg-[var(--accent-teal)]/10 text-[7px] font-black uppercase text-[var(--accent-teal)] py-1.5 px-3 rounded-lg border border-[var(--accent-teal)]/20 animate-pulse whitespace-nowrap">
+                              Valid for: {Math.max(0, Math.ceil((secureQRs[ticket.id].expiresAt - Math.floor(Date.now() / 1000)) / 60))}m left
+                           </div>
+                        )}
                       </div>
 
                       <div className="flex flex-col items-end">
@@ -300,82 +422,56 @@ export const MyTickets: React.FC = () => {
                       </div>
 
                       <div className="flex flex-col gap-2">
-                        {activeResaleId === ticket.id ? (
-                          <div className="flex items-center gap-2 p-2 rounded-2xl bg-white/5 border border-white/10 animate-in fade-in slide-in-from-right-4 duration-300">
-                            <input
-                              type="number"
-                              step="0.001"
-                              min="0"
-                              placeholder="Price (ETH)"
-                              className="w-24 bg-transparent outline-none text-xs font-black text-[var(--accent-teal)] placeholder:text-white/20 px-2"
-                              value={resaleInputs[ticket.id] || ''}
-                              onChange={(e) => setResaleInputs({ ...resaleInputs, [ticket.id]: e.target.value })}
-                            />
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
+                          >
+                            <ExternalLink size={12} /> Etherscan
+                          </a>
+
+                          {!isPast && event?.status !== 'cancelled' && ticket.status === 'active' && (
                             <button
-                              onClick={() => handleResale(ticket)}
-                              disabled={processingId === ticket.id}
-                              className="px-4 py-1.5 rounded-xl bg-[var(--accent-teal)] text-black text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                              onClick={() => {
+                                setSelectedTicketForResale({ ticket, event });
+                                setIsResaleModalOpen(true);
+                              }}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-panel border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all italic"
                             >
-                              {processingId === ticket.id ? <Loader2 size={10} className="animate-spin" /> : null}
-                              {processingId === ticket.id ? 'Processing' : 'List'}
+                              <Share2 size={12} /> Resell
                             </button>
+                          )}
+
+                          {!isPast && event?.status !== 'cancelled' && ticket.status === 'resale' && (
                             <button
-                              onClick={() => setActiveResaleId(null)}
+                              onClick={() => handleCancelResale(ticket)}
                               disabled={processingId === ticket.id}
-                              className="p-1.5 rounded-xl hover:bg-white/5 text-white/30 disabled:opacity-20"
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <Ban size={14} />
+                              {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
+                              {processingId === ticket.id ? 'Cancelling...' : 'Cancel'}
                             </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <a
-                              href={`https://sepolia.etherscan.io/nft/${config.contractAddress}/${ticket.tokenId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--accent-teal)]/20 bg-[var(--accent-teal)]/5 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-teal)]/10 transition-all"
+                          )}
+
+                          {event?.status === 'cancelled' && !ticket.isRefunded && (
+                            <button
+                              onClick={() => handleClaimRefund(ticket)}
+                              disabled={processingId === ticket.id}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[9px] font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all italic disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <ExternalLink size={12} /> Etherscan
-                            </a>
+                              {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : null}
+                              {processingId === ticket.id ? 'Claiming...' : 'Claim Refund'}
+                            </button>
+                          )}
 
-                            {!isPast && event?.status !== 'cancelled' && ticket.status === 'active' && (
-                              <button
-                                onClick={() => setActiveResaleId(ticket.id)}
-                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-panel border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all italic"
-                              >
-                                <Share2 size={12} /> Resell
-                              </button>
-                            )}
-
-                            {!isPast && event?.status !== 'cancelled' && ticket.status === 'resale' && (
-                              <button
-                                onClick={() => handleCancelResale(ticket)}
-                                disabled={processingId === ticket.id}
-                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all italic disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
-                                {processingId === ticket.id ? 'Cancelling...' : 'Cancel'}
-                              </button>
-                            )}
-
-                            {event?.status === 'cancelled' && !ticket.isRefunded && (
-                              <button
-                                onClick={() => handleClaimRefund(ticket)}
-                                disabled={processingId === ticket.id}
-                                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[9px] font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all italic disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {processingId === ticket.id ? <Loader2 size={12} className="animate-spin" /> : null}
-                                {processingId === ticket.id ? 'Claiming...' : 'Claim Refund'}
-                              </button>
-                            )}
-
-                            {event?.status === 'cancelled' && ticket.isRefunded && (
-                              <span className="flex items-center px-4 py-2.5 rounded-xl bg-[var(--status-success)]/10 text-[var(--status-success)] text-[9px] font-black uppercase tracking-widest italic border border-[var(--status-success)]/20">
-                                Refunded
-                              </span>
-                            )}
-                          </div>
-                        )}
+                          {event?.status === 'cancelled' && ticket.isRefunded && (
+                            <span className="flex items-center px-4 py-2.5 rounded-xl bg-[var(--status-success)]/10 text-[var(--status-success)] text-[9px] font-black uppercase tracking-widest italic border border-[var(--status-success)]/20">
+                              Refunded
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -400,6 +496,15 @@ export const MyTickets: React.FC = () => {
           </motion.div>
         )}
       </div>
+
+      <ResaleModal
+        isOpen={isResaleModalOpen}
+        onClose={() => setIsResaleModalOpen(false)}
+        ticket={selectedTicketForResale?.ticket}
+        event={selectedTicketForResale?.event}
+        onList={(price) => handleResale(selectedTicketForResale.ticket, price)}
+        processingId={processingId}
+      />
     </motion.div>
   );
 };

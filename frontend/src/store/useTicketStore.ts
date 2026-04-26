@@ -8,17 +8,16 @@ const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
-  // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
-  "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
-  "function getResaleListing(uint256 tokenId) public view returns (tuple(address seller, uint48 priceWei, bool active))",
-  "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint48)",
-  "function getTokenLastPricePaid(uint256 tokenId) public view returns (uint48)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint256 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps)",
+  "function getResaleListing(uint256 tokenId) public view returns (address seller, uint256 priceWei, bool active)",
+  "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint256)",
+  "function getTokenLastPricePaid(uint256 tokenId) public view returns (uint256)",
   "function isTokenRefunded(uint256 tokenId) public view returns (bool)",
   "function nextTokenId() public view returns (uint256)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
-  "event TicketListed(uint256 indexed tokenId, address indexed seller, uint48 priceWei)",
-  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei)",
+  "event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)",
   "event ListingCancelled(uint256 indexed tokenId)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
@@ -126,15 +125,36 @@ export const useTicketStore = create<TicketState>((set) => ({
         listedLogs,
         resoldLogs,
         cancelledLogs,
-        createdLogs   // for ipfsHash lookup
+        createdLogs
       ] = await Promise.all([
-        contract.queryFilter(contract.filters.Transfer(), fromBlock).catch(() => contract.queryFilter(contract.filters.Transfer(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.TicketMinted(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketMinted(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.TicketListed(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketListed(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.TicketResold(), fromBlock).catch(() => contract.queryFilter(contract.filters.TicketResold(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.ListingCancelled(), fromBlock).catch(() => contract.queryFilter(contract.filters.ListingCancelled(), -10000).catch(() => [])),
-        contract.queryFilter(contract.filters.EventCreated(), fromBlock).catch(() => contract.queryFilter(contract.filters.EventCreated(), -10000).catch(() => []))
-      ]);
+        contract.queryFilter(contract.filters.Transfer(), fromBlock).catch(err => {
+          console.warn("Transfer log fetch failed, retrying with last 10k blocks", err);
+          return contract.queryFilter(contract.filters.Transfer(), -10000);
+        }),
+        contract.queryFilter(contract.filters.TicketMinted(), fromBlock).catch(err => {
+          console.warn("Minted log fetch failed, retrying with last 10k blocks", err);
+          return contract.queryFilter(contract.filters.TicketMinted(), -10000);
+        }),
+        contract.queryFilter(contract.filters.TicketListed(), fromBlock).catch(err => {
+          console.warn("Listed log fetch failed, retrying with last 10k blocks", err);
+          return contract.queryFilter(contract.filters.TicketListed(), -10000);
+        }),
+        contract.queryFilter(contract.filters.TicketResold(), fromBlock).catch(err => {
+          console.warn("Resold log fetch failed, retrying with last 10k blocks", err);
+          return contract.queryFilter(contract.filters.TicketResold(), -10000);
+        }),
+        contract.queryFilter(contract.filters.ListingCancelled(), fromBlock).catch(err => {
+          console.warn("Cancelled log fetch failed, retrying with last 10k blocks", err);
+          return contract.queryFilter(contract.filters.ListingCancelled(), -10000);
+        }),
+        contract.queryFilter(contract.filters.EventCreated(), fromBlock).catch(err => {
+          console.warn("Created log fetch failed, retrying with last 10k blocks", err);
+          return contract.queryFilter(contract.filters.EventCreated(), -10000);
+        })
+      ]).catch(err => {
+        console.error("Critical log fetch failure:", err);
+        return [[],[],[],[],[],[]];
+      });
 
       const owners: Record<string, string> = {};
       const tokenEvents: Record<string, string> = {};
@@ -217,7 +237,7 @@ export const useTicketStore = create<TicketState>((set) => ({
               contract.getTokenLastPricePaid(tId).catch(() => 0),
               contract.isTokenRefunded(tId).catch(() => false)
             ]);
-            const priceEth = parseFloat(ethers.formatUnits(priceGwei, "gwei"));
+            const priceEth = parseFloat(ethers.formatUnits(priceGwei, "ether"));
             if (priceEth > 0) {
               purchasePrices[tId] = priceEth;
             }
@@ -236,8 +256,8 @@ export const useTicketStore = create<TicketState>((set) => ({
         const tierIndex = tokenTiers[tId] || 0;
         
         let tierName = TIER_MAP[tierIndex] || 'General';
-        // Fallback: base event price in gwei → ETH
-        let basePrice = parseFloat(ethers.formatUnits(evt.priceWei || evt[1], "gwei"));
+        // Fallback: base event price in wei → ETH
+        let basePrice = parseFloat(ethers.formatUnits(evt.priceWei || evt[1], "ether"));
 
         if (metadata?.tiers?.[tierIndex]) {
           tierName = metadata.tiers[tierIndex].name;
@@ -251,8 +271,8 @@ export const useTicketStore = create<TicketState>((set) => ({
 
         const isActiveListing = listings[tId]?.active;
         const resalePriceWei = listings[tId]?.priceWei;
-        // TicketListed emits priceWei in gwei (uint48); convert to ETH for UI
-        const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatUnits(resalePriceWei, "gwei")) : undefined;
+        // TicketListed emits priceWei in wei; convert to ETH for UI
+        const resalePrice = (isActiveListing && resalePriceWei) ? parseFloat(ethers.formatUnits(resalePriceWei, "ether")) : undefined;
 
         loadedTickets.push({
           id: `tkt_${tId}`,

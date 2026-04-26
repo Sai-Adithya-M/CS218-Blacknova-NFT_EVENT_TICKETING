@@ -2,28 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, TrendingUp, Wallet, Ticket, PieChart, Info, ArrowUpRight, Loader2, RefreshCw } from 'lucide-react';
 import { ethers } from 'ethers';
-import { useEventStore, type Event } from '../../store/useEventStore';
+import { useEventStore } from '../../store/useEventStore';
 import { config } from '../../config';
 import { getReadProvider } from '../../utils/blockchain';
 
 const FINANCIALS_ABI = [
-  "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
-  "function getTokenPurchasePrice(uint256 tokenId) public view returns (uint48)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint256 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps)",
+  "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint256)",
+  "function tokenToTier(uint256 tokenId) public view returns (uint8)",
   "function nextTokenId() public view returns (uint256)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)",
 ];
 
 interface ChainFinancials {
-  priceGwei: bigint;
+  priceWei: bigint;
   maxTickets: number;
   ticketsSold: number;
   royaltyPct: number;
   primaryRevenueWei: bigint;
+  royaltyRevenueWei: bigint;
   totalRevenueWei: bigint;
   deploymentCostWei: bigint;
-  gasUsed: bigint;
-  tokenCount: number; // how many tokens we found on-chain for this event
+  tierRevenues: Record<number, bigint>;
 }
 
 interface EventFinancialsModalProps {
@@ -52,7 +54,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
 
       // 1. Fetch live on-chain event struct
       const evtData = await contract.fetchEventData(numericId);
-      const priceGwei = BigInt(evtData.priceWei ?? evtData[1]);
+      const priceWei = BigInt(evtData.priceWei ?? evtData[1]);
       const maxTickets = Number(evtData.maxTickets ?? evtData[2]);
       const ticketsSold = Number(evtData.ticketsSold ?? evtData[3]);
       const royaltyPct = Number(evtData.royaltyBps ?? evtData[4]);
@@ -80,19 +82,50 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
       // their revenue is unknown — we do NOT substitute the current base price
       // because the organiser may have edited it since the sale.
       let primaryRevenueWei = 0n;
+      const tierRevenues: Record<number, bigint> = {};
+
       if (eventTokenIds.length > 0) {
-        const prices = await Promise.all(
-          eventTokenIds.map(id => contract.getTokenPurchasePrice(id).catch(() => 0n))
+        const tokenDetails = await Promise.all(
+          eventTokenIds.map(async (id) => {
+            const [price, tier] = await Promise.all([
+              contract.getTokenOriginalPrice(id).catch(() => 0n),
+              contract.tokenToTier(id).catch(() => 0)
+            ]);
+            return { price, tier };
+          })
         );
-        for (const p of prices) {
-          const gweiVal = BigInt(p);
-          if (gweiVal > 0n) {
-            primaryRevenueWei += gweiVal * BigInt(1e9);
+
+        for (const detail of tokenDetails) {
+          const weiVal = BigInt(detail.price);
+          if (weiVal > 0n) {
+            primaryRevenueWei += weiVal;
+            tierRevenues[detail.tier] = (tierRevenues[detail.tier] || 0n) + weiVal;
           }
         }
       }
 
-      // 4. Get deployment cost from EventCreated log (chunked query)
+      // 4. Calculate Royalty Revenue from secondary sales
+      let royaltyRevenueWei = 0n;
+      try {
+        const latestBlock = await provider.getBlockNumber();
+        const startBlock = config.deploymentBlock || 5700000;
+        // Royalty events are fewer, so we can query in larger chunks or all at once if supported
+        const resaleLogs = await contract.queryFilter(contract.filters.TicketResold(), startBlock, latestBlock);
+        
+        for (const log of resaleLogs) {
+          const tokenId = Number((log as any).args[0]);
+          const priceWei = BigInt((log as any).args[3]) * BigInt(1e9);
+          
+          if (eventTokenIds.includes(tokenId)) {
+            const royalty = (priceWei * BigInt(royaltyPct)) / 100n;
+            royaltyRevenueWei += royalty;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch royalty events:", err);
+      }
+
+      // 5. Get deployment cost from EventCreated log (chunked query)
       let deploymentCostWei = 0n;
       let gasUsed = 0n;
       try {
@@ -122,13 +155,13 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
         }
       } catch {}
 
-      const totalRevenueWei = primaryRevenueWei;
+      const totalRevenueWei = primaryRevenueWei + royaltyRevenueWei;
 
       setFinancials({
-        priceGwei, maxTickets, ticketsSold, royaltyPct,
-        primaryRevenueWei, totalRevenueWei,
-        deploymentCostWei, gasUsed,
-        tokenCount: eventTokenIds.length,
+        priceWei, maxTickets, ticketsSold, royaltyPct,
+        primaryRevenueWei, royaltyRevenueWei, totalRevenueWei,
+        deploymentCostWei,
+        tierRevenues
       });
     } catch (err: any) {
       console.error("Failed to fetch financials:", err);
@@ -168,9 +201,9 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
   const deploymentCostEth = parseFloat(ethers.formatEther(deploymentCostWei));
   const netProfitEth = parseFloat(ethers.formatEther(netProfitWei));
   const totalRevenueEth = parseFloat(ethers.formatEther(totalRevenueWei));
-  const ticketsSold = financials?.ticketsSold ?? tiers.reduce((s, t) => s + (t.sold || 0), 0);
-  const totalTickets = financials?.maxTickets ?? tiers.reduce((s, t) => s + t.supply, 0);
-  const currentPriceEth = financials ? parseFloat(ethers.formatUnits(financials.priceGwei, "gwei")) : (tiers[0]?.price ?? 0);
+  const ticketsSold = financials?.ticketsSold ?? (event?.tiers?.reduce((s: number, t: any) => s + (t.sold || 0), 0) || 0);
+  const totalTickets = financials?.maxTickets ?? (event?.tiers?.reduce((s: number, t: any) => s + t.supply, 0) || 0);
+  const currentPriceEth = financials ? parseFloat(ethers.formatUnits(financials.priceWei, "ether")) : (event?.tiers?.[0]?.price ?? 0);
   const royaltyPct = financials?.royaltyPct ?? event.royaltyBps;
 
   // For the tier table we show sold counts from store (per-tier) 
@@ -317,29 +350,33 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {tiers.length > 0 ? tiers.map((tier, idx) => {
-                    const progress = tier.supply > 0 ? (tier.sold / tier.supply) * 100 : 0;
-                    return (
-                    <tr key={idx} className="text-xs hover:bg-white/[0.03] transition-all group">
-                      <td className="px-8 py-6 font-black text-white uppercase tracking-wider">{tier.name}</td>
-                      <td className="px-8 py-6 text-zinc-400 font-mono">{formatValue(tier.price)}</td>
-                      <td className="px-8 py-6 text-zinc-400 font-bold">{tier.sold} <span className="text-zinc-600 font-normal">/ {tier.supply}</span></td>
-                      <td className="px-8 py-6 text-zinc-500 font-bold italic">—</td>
-                      <td className="px-8 py-6">
-                        <div className="flex items-center justify-end gap-4">
-                          <div className="w-20 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                            <motion.div
-                              initial={{ width: 0 }}
-                              animate={{ width: `${progress}%` }}
-                              className="h-full bg-[var(--accent-teal)] shadow-[0_0_10px_rgba(45,212,191,0.5)]"
-                            />
+                    {tiers.length > 0 ? tiers.map((tier, idx) => {
+                      const progress = tier.supply > 0 ? (tier.sold / tier.supply) * 100 : 0;
+                      const tierRevenue = financials?.tierRevenues[idx] ?? 0n;
+                      
+                      return (
+                      <tr key={idx} className="text-xs hover:bg-white/[0.03] transition-all group">
+                        <td className="px-8 py-6 font-black text-white uppercase tracking-wider">{tier.name}</td>
+                        <td className="px-8 py-6 text-zinc-400 font-mono">{formatValue(tier.price)}</td>
+                        <td className="px-8 py-6 text-zinc-400 font-bold">{tier.sold} <span className="text-zinc-600 font-normal">/ {tier.supply}</span></td>
+                        <td className="px-8 py-6 text-[var(--accent-teal)] font-bold italic">
+                          {isLoading ? "..." : formatEthValue(tierRevenue)}
+                        </td>
+                        <td className="px-8 py-6">
+                          <div className="flex items-center justify-end gap-4">
+                            <div className="w-20 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${progress}%` }}
+                                className="h-full bg-[var(--accent-teal)] shadow-[0_0_10px_rgba(45,212,191,0.5)]"
+                              />
+                            </div>
+                            <span className="text-[9px] font-black text-zinc-600">{Math.round(progress)}%</span>
                           </div>
-                          <span className="text-[9px] font-black text-zinc-600">{Math.round(progress)}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                    );
-                  }) : (
+                        </td>
+                      </tr>
+                      );
+                    }) : (
                     <tr>
                       <td colSpan={5} className="px-8 py-12 text-center text-zinc-600 text-[10px] font-black uppercase tracking-widest italic">
                         No sales data available for this event
@@ -367,8 +404,12 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                   <p className="text-xs font-black text-purple-400 italic">{royaltyPct} BPS</p>
                 </div>
               </div>
+              <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                <span>Earned Royalties</span>
+                <span className="text-[var(--accent-teal)]">{formatEthValue(financials?.royaltyRevenueWei || 0n)}</span>
+              </div>
               <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-[9px] font-medium text-zinc-500 leading-relaxed uppercase tracking-tighter">
-                You will receive this percentage of every ticket resale value automatically on the secondary market.
+                You receive this percentage of every ticket resale value automatically on the secondary market.
               </div>
             </div>
 

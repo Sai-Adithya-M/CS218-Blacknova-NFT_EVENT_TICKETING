@@ -1,21 +1,21 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useEventStore } from '../store/useEventStore';
+import { useEventStore, type Event, type TicketTier } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, Hash, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, Hash, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight, Ban, Camera, MapPin, Users, ExternalLink } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { EditEventModal } from '../components/events/EditEventModal';
 import { EventFinancialsModal } from '../components/events/EventFinancialsModal';
+import { CancelEventModal } from '../components/events/CancelEventModal';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ethers } from 'ethers';
-import type { TicketTier } from '../store/useEventStore';
 import { config } from '../config';
 
 import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory ipfsHash, uint24 maxTickets, uint40 priceWei, uint8 royaltyBps, uint8[] memory tierIds, uint24[] memory tierSupplies) external",
+  "function createEvent(string memory ipfsHash, uint24 maxTickets, uint256 priceWei, uint8 royaltyBps, uint8[] memory tierIds, uint24[] memory tierSupplies) external",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
@@ -33,6 +33,7 @@ export const ManageEvents: React.FC = () => {
   const [isMining, setIsMining] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [selectedFinancials, setSelectedFinancials] = useState<Event | null>(null);
+  const [cancellingEvent, setCancellingEvent] = useState<Event | null>(null);
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -45,7 +46,10 @@ export const ManageEvents: React.FC = () => {
     date: '',
     location: '',
     category: 'Music',
-    royalty: '5', // Default 5%
+    royalty: '5',
+    minAge: 'All ages',
+    venueName: '',
+    locationLink: '',
   });
 
   const [tiers, setTiers] = useState<TierFormData[]>([
@@ -84,6 +88,10 @@ export const ManageEvents: React.FC = () => {
   };
 
   const addTier = () => {
+    if (tiers.length >= 3) {
+      setError("Maximum 3 tiers allowed per event.");
+      return;
+    }
     setTiers([...tiers, { name: '', price: '', supply: '100' }]);
   };
 
@@ -153,8 +161,8 @@ export const ManageEvents: React.FC = () => {
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
-      // Contract stores price in gwei (uint40 max ~1099 ETH in gwei)
-      const basePriceWei = ethers.parseUnits(lowestPrice.toString(), "gwei");
+      // Contract now stores price in wei
+      const basePriceWei = ethers.parseUnits(lowestPrice.toString(), "ether");
       // royaltyBps is 0-100 (uint8), not basis points
       const royaltyBps = Math.min(100, Math.max(0, Math.floor(parseFloat(formData.royalty || '0'))));
 
@@ -171,6 +179,9 @@ export const ManageEvents: React.FC = () => {
       const metadataJSON = {
         name: formData.title || 'Event',
         location: formData.location || '',
+        venueName: formData.venueName || '',
+        locationLink: formData.locationLink || '',
+        minAge: formData.minAge || 'All ages',
         date: formData.date || new Date().toISOString(),
         description: formData.description || '',
         category: formData.category || 'Music',
@@ -236,6 +247,9 @@ export const ManageEvents: React.FC = () => {
         category: metadataJSON.category,
         organizerId: signerAddress,
         royaltyBps: royaltyBps,
+        venueName: metadataJSON.venueName,
+        minAge: metadataJSON.minAge,
+        locationLink: metadataJSON.locationLink,
         status: 'active',
         deploymentCost,
         gasUsed: gasUsedStr,
@@ -248,6 +262,18 @@ export const ManageEvents: React.FC = () => {
         }))
       });
       
+      setFormData({
+        title: '',
+        description: '',
+        date: '',
+        location: '',
+        category: 'Music',
+        royalty: '5',
+        minAge: 'All ages',
+        venueName: '',
+        locationLink: '',
+      });
+      
       // Redirect to Marketplace after success
       navigate('/events');
       
@@ -257,43 +283,11 @@ export const ManageEvents: React.FC = () => {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
-      setError(err.message || "Failed to create event.");
-    } finally {
-      setIsMining(false);
-    }
-  };
-
-  const handleCancelEvent = async (event: any) => {
-    if (!confirm("Are you SURE you want to cancel this event? You must deposit ETH to cover refunds. This action cannot be undone.")) return;
-
-    setIsMining(true);
-    try {
-      const provider = new ethers.BrowserProvider((window as any).ethereum);
-      const signer = await provider.getSigner();
-      const contract = new ethers.Contract(config.contractAddress, [
-        "function cancelEvent(uint256 eventId) external payable",
-        "function eventRefundLiability(uint256) public view returns (uint256)"
-      ], signer);
-      
-      const eventIdNum = event.id.replace('evt_', '');
-      
-      // Automatically fetch the exact liability from the smart contract!
-      const requiredLiabilityWei = await contract.eventRefundLiability(eventIdNum);
-      const requiredEth = ethers.formatEther(requiredLiabilityWei);
-      
-      if (!confirm(`The exact total refund liability for this event is ${requiredEth} ETH. Proceed to deposit and cancel?`)) {
-        setIsMining(false);
-        return;
+      if (err.code === 4001 || err.message?.toLowerCase().includes("user rejected")) {
+        setError("Transaction cancelled in MetaMask.");
+      } else {
+        setError(err.message || "Failed to create event.");
       }
-      
-      const tx = await contract.cancelEvent(eventIdNum, { value: requiredLiabilityWei });
-      await tx.wait();
-      
-      alert("Event Cancelled successfully! Refunds are now active.");
-      window.location.reload();
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "Failed to cancel event");
     } finally {
       setIsMining(false);
     }
@@ -390,13 +384,15 @@ export const ManageEvents: React.FC = () => {
           <h2 className="text-xs font-black tracking-[0.5em] uppercase text-[var(--accent-purple)] mb-3 italic opacity-80">Event Management</h2>
           <h1 className="text-6xl font-black tracking-tighter italic leading-none">CREATE EVENT</h1>
         </div>
-        <button
-          className="px-8 py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-xs flex items-center gap-2 shadow-lg hover:shadow-white/20 transition-all"
-          onClick={() => setIsCreating(!isCreating)}
-        >
-          {isCreating ? <LayoutDashboard size={16} /> : <Plus size={16} />}
-          {isCreating ? 'View My Events' : 'Create New Event'}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="px-8 py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-xs flex items-center gap-2 shadow-lg hover:shadow-white/20 transition-all"
+            onClick={() => setIsCreating(!isCreating)}
+          >
+            {isCreating ? <LayoutDashboard size={16} /> : <Plus size={16} />}
+            {isCreating ? 'View My Events' : 'Create New Event'}
+          </button>
+        </div>
       </motion.div>
 
       {isCreating ? (
@@ -448,13 +444,6 @@ export const ManageEvents: React.FC = () => {
                       value={formData.date}
                       onChange={e => setFormData({ ...formData, date: e.target.value })}
                     />
-                    <input
-                      required
-                      placeholder="Location"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white placeholder:text-white/30"
-                      value={formData.location}
-                      onChange={e => setFormData({ ...formData, location: e.target.value })}
-                    />
                   </div>
                   <select
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white/70"
@@ -497,13 +486,94 @@ export const ManageEvents: React.FC = () => {
 
                 <section className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-teal)] italic flex items-center gap-2">
-                      <Layers size={12} /> 3. Ticket Tiers
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">3. Venue Details</h3>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/10">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent-teal)] animate-pulse" />
+                      <span className="text-[8px] font-black uppercase text-white/40 tracking-widest">Off-Chain Storage</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div className="relative group">
+                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-white/20 group-focus-within:text-[var(--accent-teal)] transition-colors">
+                          <MapPin size={16} />
+                        </div>
+                        <input
+                          placeholder="Venue Name (e.g. Madison Square Garden)"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
+                          value={formData.venueName}
+                          onChange={e => setFormData({ ...formData, venueName: e.target.value })}
+                        />
+                      </div>
+                      <div className="relative group">
+                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-white/20 group-focus-within:text-[var(--accent-teal)] transition-colors">
+                          <MapPin size={16} className="opacity-40" />
+                        </div>
+                        <input
+                          placeholder="City / Address (e.g. New York, NY)"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
+                          value={formData.location}
+                          onChange={e => setFormData({ ...formData, location: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-white/20 group-focus-within:text-[var(--accent-teal)] transition-colors">
+                        <ExternalLink size={16} />
+                      </div>
+                      <input
+                        placeholder="Location Link (e.g. Google Maps URL)"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
+                        value={formData.locationLink}
+                        onChange={e => setFormData({ ...formData, locationLink: e.target.value })}
+                      />
+                    </div>
+                    
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-black uppercase tracking-widest text-white/40 ml-1 flex items-center gap-1.5">
+                          <Users size={10} className="text-[var(--accent-purple)]" /> Minimum Entry Age
+                        </label>
+                        <select
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-bold text-white/80 text-sm cursor-pointer hover:bg-white/[0.08]"
+                          value={formData.minAge}
+                          onChange={e => setFormData({ ...formData, minAge: e.target.value })}
+                        >
+                          <option value="All ages" className="bg-[#12121a]">All ages</option>
+                          <option value="13+" className="bg-[#12121a]">13+</option>
+                          <option value="16+" className="bg-[#12121a]">16+</option>
+                          <option value="18+" className="bg-[#12121a]">18+</option>
+                          <option value="21+" className="bg-[#12121a]">21+</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                         <label className="text-[9px] font-black uppercase tracking-widest text-white/40 ml-1 flex items-center gap-1.5">
+                          <Camera size={10} className="text-[var(--accent-teal)]" /> Security Level
+                        </label>
+                        <div className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 px-4 text-xs font-bold text-white/30 flex items-center gap-2 cursor-not-allowed">
+                          <ShieldCheck size={14} className="text-[var(--accent-teal)]/40" />
+                          Encrypted QR Gates
+                        </div>
+                      </div>
+                    </div>
+
+
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic flex items-center gap-2">
+                      <Layers size={12} /> 4. Ticket Tiers
                     </h3>
                     <button
                       type="button"
                       onClick={addTier}
-                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-all flex items-center gap-1.5"
+                      disabled={tiers.length >= 3}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] text-[9px] font-black uppercase tracking-widest border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-all flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       <Plus size={10} /> Add Tier
                     </button>
@@ -560,7 +630,7 @@ export const ManageEvents: React.FC = () => {
                 </section>
 
                 <section className="space-y-4">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">4. Media Upload</h3>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">5. Media Upload</h3>
                   <div
                     onClick={() => fileInputRef.current?.click()}
                     className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all relative overflow-hidden min-h-[160px]"
@@ -664,7 +734,8 @@ export const ManageEvents: React.FC = () => {
 
               .filter(event => {
                 const isPast = new Date(event.date) < new Date();
-                return manageTab === 'active' ? !isPast : isPast;
+                const isHistory = isPast || event.status === 'cancelled';
+                return manageTab === 'active' ? !isHistory : isHistory;
               })
               .length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -673,7 +744,8 @@ export const ManageEvents: React.FC = () => {
 
                   .filter(event => {
                     const isPast = new Date(event.date) < new Date();
-                    return manageTab === 'active' ? !isPast : isPast;
+                    const isHistory = isPast || event.status === 'cancelled';
+                    return manageTab === 'active' ? !isHistory : isHistory;
                   })
                   .map(event => (
                     <div key={event.id} className="space-y-4">
@@ -687,7 +759,7 @@ export const ManageEvents: React.FC = () => {
                             Edit Details
                           </button>
                           <button
-                            onClick={() => handleCancelEvent(event)}
+                            onClick={() => setCancellingEvent(event)}
                             className="w-full py-3 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] font-black uppercase tracking-widest hover:bg-orange-500/20 transition-all flex justify-center items-center gap-2"
                           >
                             Cancel Event
@@ -717,7 +789,13 @@ export const ManageEvents: React.FC = () => {
                             <ArrowUpRight size={14} className="text-white/20 group-hover:text-[var(--accent-teal)]" />
                           </button>
 
-                          <div className="grid grid-cols-2 gap-4">
+                          <button
+                            onClick={() => navigate(`/scan/${event.id}`)}
+                            className="w-full py-4 rounded-2xl bg-[var(--accent-teal)] text-black font-black uppercase tracking-widest text-[10px] shadow-[0_10px_30px_rgba(var(--accent-teal),0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex justify-center items-center gap-2"
+                          >
+                            <Camera size={16} />
+                            Open Gate Scanner
+                          </button>
                             <div className="p-3 rounded-xl bg-black/40 border border-white/5">
                               <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
                                 <Hash size={8} /> Event ID
@@ -736,25 +814,25 @@ export const ManageEvents: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-dashed border-white/10 text-center p-8">
-                <LayoutDashboard size={48} className="mb-4 text-white/10" />
-                <p className="text-lg font-black uppercase italic tracking-widest text-white/30 mb-2">
-                  {manageTab === 'active' ? 'No Active Events' : 'No Past Events'}
-                </p>
-                <p className="text-sm text-white/20">
-                  {manageTab === 'active'
-                    ? 'Click "Create New Event" to launch your first experience.'
-                    : 'Your concluded events will show up here as historical records.'}
-                </p>
-              </div>
-            )}
-          </motion.div>
-        </div>
-      )}
+                      ))}
+                  </div>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-dashed border-white/10 text-center p-8">
+                  <LayoutDashboard size={48} className="mb-4 text-white/10" />
+                  <p className="text-lg font-black uppercase italic tracking-widest text-white/30 mb-2">
+                    {manageTab === 'active' ? 'No Active Events' : 'No Past Events'}
+                  </p>
+                  <p className="text-sm text-white/20">
+                    {manageTab === 'active'
+                      ? 'Click "Create New Event" to launch your first experience.'
+                      : 'Your concluded events will show up here as historical records.'}
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+
 
       {editingEventId && events.find(e => e.id === editingEventId) && (
         <EditEventModal
@@ -767,6 +845,13 @@ export const ManageEvents: React.FC = () => {
         <EventFinancialsModal
           eventId={selectedFinancials.id}
           onClose={() => setSelectedFinancials(null)}
+        />
+      )}
+
+      {cancellingEvent && (
+        <CancelEventModal
+          event={cancellingEvent}
+          onClose={() => setCancellingEvent(null)}
         />
       )}
     </motion.div>
