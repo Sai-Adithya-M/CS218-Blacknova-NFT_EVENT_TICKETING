@@ -7,9 +7,10 @@ import { fetchFromIPFS } from '../utils/ipfs';
 const ABI = [
   "function nextEventId() public view returns (uint256)",
   // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
-  "function fetchEventData(uint256 eventId) public view returns (tuple(address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps))",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint256 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps)",
   // Per-tier sold/max from chain (no log queries needed)
   "function getTierData(uint256 eventId, uint8 tier) public view returns (uint24 sold, uint24 max)",
+  "function isCancelled(uint256 eventId) public view returns (bool)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
@@ -86,13 +87,16 @@ export interface Event {
   royaltyBps: number;
   status: 'active' | 'past' | 'cancelled';
   tiers: TicketTier[];
+  venueName?: string;
+  minAge?: string;
+  locationLink?: string;
   hasIpfsError?: boolean;
   deploymentCost?: string;
   gasUsed?: string;
   txHash?: string;
   _tierSales?: Record<number, number>;
-  _tierMaxSupplies?: Record<number, number>; // on-chain per-tier max (from getTierData)
-  _ipfsHash?: string; // kept for retryMetadata fallback
+  _tierMaxSupplies?: Record<number, number>; 
+  _ipfsHash?: string; 
 }
 
 interface EventState {
@@ -154,6 +158,9 @@ function applyMetadata(e: Event, metadata: any): Event {
     description: metadata.description || e.description,
     date: metadata.date || metadata.dateTime || e.date,
     location: metadata.location || e.location,
+    venueName: metadata.venueName || e.venueName,
+    minAge: metadata.minAge || e.minAge,
+    locationLink: metadata.locationLink || e.locationLink,
     category: metadata.category || e.category,
     imageUrl: metadata.image || e.imageUrl,
     hasIpfsError: false,
@@ -286,7 +293,10 @@ export const useEventStore = create<EventState>((set, get) => ({
       // Step 3: Fetch on-chain struct data for all events in parallel
       const onChainData = await Promise.all(
         Array.from({ length: totalEvents }, (_, i) =>
-          contract.fetchEventData(i + 1).catch(() => null)
+          Promise.all([
+            contract.fetchEventData(i + 1).catch(() => null),
+            contract.isCancelled(i + 1).catch(() => false)
+          ])
         )
       );
 
@@ -294,7 +304,8 @@ export const useEventStore = create<EventState>((set, get) => ({
       // We check tiers 0, 1, 2 (Silver, Gold, VIP) for each event
       const MAX_TIERS = 3;
       const tierDataPromises: Promise<Record<number, { sold: number; max: number }>>[] = 
-        onChainData.map((evt, idx) => {
+        onChainData.map((data, idx) => {
+          const evt = data[0];
           if (!evt) return Promise.resolve({});
           const eventNum = idx + 1;
           return Promise.all(
@@ -316,7 +327,9 @@ export const useEventStore = create<EventState>((set, get) => ({
       const allTierData = await Promise.all(tierDataPromises);
 
       // Step 5: Build skeleton events with on-chain tier data
-      const skeletonEvents: Event[] = onChainData.map((evt, idx) => {
+      const skeletonEvents: Event[] = onChainData.map((data, idx) => {
+        const evt = data[0];
+        const isCancelled = data[1];
         if (!evt) return null;
         const i = idx + 1;
         const eventId = `evt_${i}`;
@@ -342,12 +355,12 @@ export const useEventStore = create<EventState>((set, get) => ({
           category: "Other",
           organizerId: organiser.toLowerCase(),
           royaltyBps: Number(evt.royaltyBps ?? evt[4]),
-          status: 'active' as const,
+          status: isCancelled ? 'cancelled' : 'active',
           hasIpfsError: false,
           tiers: [{
             id: `tier_${eventId}_0`,
             name: 'General Access',
-            price: parseFloat(ethers.formatUnits(evt.priceWei ?? evt[1], "gwei")),
+            price: parseFloat(ethers.formatUnits(evt.priceWei ?? evt[1], "ether")),
             supply: Number(evt.maxTickets ?? evt[2]),
             sold: onChainTotalSold
           }],
@@ -355,7 +368,7 @@ export const useEventStore = create<EventState>((set, get) => ({
           _tierSales: tierSales,
           _tierMaxSupplies: tierMaxSupplies,
           _ipfsHash: eventIpfsHashes[eventId],
-        } satisfies Event;
+        } as Event;
       }).filter((e): e is Event => e !== null);
 
       // Step 5: Fetch ALL IPFS metadata in parallel (cache-first)

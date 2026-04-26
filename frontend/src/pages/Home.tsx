@@ -63,7 +63,7 @@ export const Home: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const activeEvents = events.filter(e => e.status === 'active' && new Date(e.date) > new Date()).slice(0, 6);
+  const activeEvents = events.filter(e => e.status === 'active' && new Date(e.date) > new Date() && !e.hasIpfsError).slice(0, 6);
 
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
@@ -127,7 +127,7 @@ export const Home: React.FC = () => {
               {/* Badge */}
               <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full border border-white/10 bg-white/5 mb-8 backdrop-blur-md">
                 <span className="w-2 h-2 rounded-full bg-[var(--accent-teal)] animate-ping inline-block" />
-                <span className="text-[10px] font-black tracking-[0.25em] uppercase text-white/60">NIFTING — Web3 Ticketing</span>
+                <span className="text-[10px] font-black tracking-[0.25em] uppercase text-white/60">NETIX — Web3 Ticketing</span>
               </div>
 
               {/* Headline */}
@@ -222,7 +222,7 @@ export const Home: React.FC = () => {
         >
           {Array.from({ length: 3 }).map((_, i) => (
             <React.Fragment key={i}>
-              {['SECURE ON-CHAIN', 'TRUE OWNERSHIP', 'NO SCALPERS', 'DECENTRALIZED TICKETING'].map(e => (
+              {['SECURE ON-CHAIN', 'TRUE OWNERSHIP', 'NO SCALPERS', 'DECENTRALIZED TICKETING', 'CRYPTOGRAPHIC TICKETS'].map(e => (
                 <span key={e} className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-white/30">
                   <span className="text-[var(--accent-purple)] text-xs">✦</span> {e}
                 </span>
@@ -251,7 +251,7 @@ export const Home: React.FC = () => {
               <motion.div
                 key={item.step}
                 variants={itemVariants}
-                className="relative p-8 rounded-3xl border border-white/8 bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/15 transition-all group"
+                className="relative p-8 rounded-3xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-[var(--accent-teal)]/40 transition-all duration-500 group shadow-lg hover:shadow-[var(--accent-teal)]/5"
               >
                 <div className="absolute -top-5 left-8 text-[10px] font-black tracking-[0.3em] text-white/20 uppercase">{item.step}</div>
                 <div className={`w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center mb-6 ${item.color} group-hover:scale-105 transition-transform`}>
@@ -290,7 +290,7 @@ export const Home: React.FC = () => {
                 transition={{ delay: i * 0.08 }}
                 whileHover={{ scale: 1.02 }}
                 onClick={() => navigate('/events')}
-                className={`relative p-6 rounded-2xl border border-white/8 bg-gradient-to-br ${cat.color} cursor-pointer group overflow-hidden`}
+                className={`relative p-6 rounded-2xl border border-white/10 bg-gradient-to-br ${cat.color} cursor-pointer group overflow-hidden transition-all duration-500 hover:border-white/40 hover:bg-white/[0.05] shadow-lg`}
               >
                 <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-[var(--accent-teal)] mb-4">
                   <Ticket size={20} />
@@ -530,11 +530,15 @@ export const Home: React.FC = () => {
         <div className="px-12">
           <div className="grid md:grid-cols-[2fr_1fr_1fr] gap-12 mb-14">
             <div>
-              <Link to="/" className="flex items-center gap-2 mb-5">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center">
-                  <Sparkles className="text-white" size={15} />
+              <Link to="/" className="flex items-center gap-2.5 group mb-6">
+                <div className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center shadow-lg bg-white/5 border border-white/10 group-hover:scale-110 transition-transform">
+                  <div className="w-full h-full bg-gradient-to-br from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center">
+                    <Sparkles className="text-white" size={16} />
+                  </div>
                 </div>
-                <span className="font-black tracking-tight uppercase italic">BLACK<span className="text-[var(--accent-teal)]">NOVA</span></span>
+                <span className="text-xl font-black tracking-tight uppercase italic text-white">
+                  NET<span className="text-[var(--accent-teal)]">IX</span>
+                </span>
               </Link>
               <p className="text-white/40 text-xs font-medium leading-relaxed">
                 The premier Web3 platform for secure, immutable NFT event ticketing.
@@ -580,7 +584,7 @@ export const Home: React.FC = () => {
 
           <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-[10px] font-black uppercase tracking-widest text-white/30 italic">
-              © 2026 NIFTING. ALL RIGHTS RESERVED. ON-CHAIN VERIFIED.
+              © 2026 NETIX. ALL RIGHTS RESERVED. ON-CHAIN VERIFIED.
             </p>
             <div className="flex gap-6">
               <Twitter size={15} className="text-white/30 hover:text-white cursor-pointer transition-colors" />

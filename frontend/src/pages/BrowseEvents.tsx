@@ -23,7 +23,7 @@ export const BrowseEvents: React.FC = () => {
       // Basic status and expiration filter
       const eventDate = new Date(event.date);
       const isExpired = !isNaN(eventDate.getTime()) && eventDate < new Date();
-      const isActive = event.status === 'active' && !isExpired;
+      const isActive = event.status === 'active' && !isExpired && !event.hasIpfsError;
       
       if (!isActive) return false;
 

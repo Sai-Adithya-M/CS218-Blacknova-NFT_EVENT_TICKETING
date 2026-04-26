@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Calendar, MapPin, Tag, Wallet, 
-  Loader2, CheckCircle, Plus, Minus, ShoppingBag
+  Loader2, CheckCircle, Plus, Minus, ShoppingBag, Users
 } from 'lucide-react';
 import type { Event } from '../../store/useEventStore';
 import { useEventStore } from '../../store/useEventStore';
@@ -14,10 +15,10 @@ import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
   "function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) public payable",
-  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities, uint40[] memory pricesGwei) public payable",
+  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
-  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint48 priceWei)"
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)"
 ];
 
 
@@ -54,9 +55,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
   const getTierQuantity = (tierId: string) => quantities[tierId] || 0;
   
-  const updateTierQuantity = (tierId: string, delta: number, max: number) => {
-    const current = getTierQuantity(tierId);
-    const next = Math.max(0, Math.min(max, current + delta));
+  const updateTierQuantity = (tierId: string, delta: number, tierAvailable: number) => {
+    const currentTier = getTierQuantity(tierId);
+    const currentTotal = totalQuantity;
+    
+    // Global limit of 10 tickets total across all tiers
+    if (delta > 0 && currentTotal >= 10) return;
+    
+    const next = Math.max(0, Math.min(tierAvailable, currentTier + delta));
     setQuantities(prev => ({ ...prev, [tierId]: next }));
   };
 
@@ -72,7 +78,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
   const handlePurchase = async () => {
     if (!isAuthenticated || !user) {
-      alert("Please connect your wallet first.");
+      toast.error("Please connect your wallet first.");
       return;
     }
     if (totalQuantity === 0) return;
@@ -102,16 +108,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       });
 
 
-      // Build per-tier price array in gwei for on-chain storage
-      const tierPricesGwei: bigint[] = [];
-      event.tiers.forEach((tier, idx) => {
-        const q = getTierQuantity(tier.id);
-        if (q > 0) {
-          tierPricesGwei.push(ethers.parseUnits(tier.price.toString(), "gwei"));
-        }
-      });
-
-      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, tierPricesGwei, { value: totalValue });
+      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
       const receipt = await tx.wait();
 
       const mintedIds: string[] = [];
@@ -142,13 +139,17 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       setStep('success');
     } catch (err: any) {
       console.error("Purchase failed:", err);
-      setErrorMsg(err.reason || err.message || 'Transaction failed.');
+      if (err.code === 4001 || err.message?.toLowerCase().includes("user rejected")) {
+        setErrorMsg("Transaction cancelled in MetaMask. Please try again when you're ready.");
+      } else {
+        setErrorMsg(err.reason || err.message || 'Transaction failed.');
+      }
       setStep('error');
     }
   };
 
   const handleBuyResale = async () => {
-    if (!isAuthenticated || !user) { alert("Please connect wallet."); return; }
+    if (!isAuthenticated || !user) { toast.error("Please connect wallet."); return; }
     if (!selectedResaleTicket) return;
     setStep('confirming');
     try {
@@ -175,9 +176,22 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={handleClose} />
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
+            onClick={step === 'confirming' ? undefined : handleClose} 
+          />
           <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#0a0a0f] shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={handleClose} className="absolute top-5 right-5 z-10 w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-all"><X size={18} /></button>
+            {step !== 'confirming' && (
+              <button 
+                onClick={handleClose} 
+                className="absolute top-5 right-5 z-10 w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-all"
+              >
+                <X size={18} />
+              </button>
+            )}
             {step === 'details' && (
               <div className="pb-8">
                 <div className="relative h-56 overflow-hidden">
@@ -185,6 +199,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
                   <div className="absolute bottom-6 left-6">
                     <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3 inline-block">Verified Event</span>
+                    {event.royaltyBps > 0 && (
+                      <span className="ml-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-white/50 mb-3 inline-block">
+                        {event.royaltyBps}% Royalty
+                      </span>
+                    )}
                     <h2 className="text-3xl font-black tracking-tight italic text-white">{event.title}</h2>
 
                   </div>
@@ -193,7 +212,19 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   <div className="flex flex-wrap gap-6 text-[11px] font-bold text-white/40 tracking-widest">
 
                     <span className="flex items-center gap-2"><Calendar size={14} className="text-[var(--accent-purple)]" /> {date.toLocaleDateString()}</span>
-                    <span className="flex items-center gap-2"><MapPin size={14} className="text-[var(--accent-teal)]" /> {event.location}</span>
+                    <span className="flex items-center gap-2">
+                      <MapPin size={14} className="text-[var(--accent-teal)]" /> 
+                      {event.locationLink ? (
+                        <a href={event.locationLink} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--accent-teal)] transition-colors underline decoration-dotted underline-offset-4">
+                          {event.venueName ? `${event.venueName}, ${event.location}` : event.location}
+                        </a>
+                      ) : (
+                        event.venueName ? `${event.venueName}, ${event.location}` : event.location
+                      )}
+                    </span>
+                    {event.minAge && (
+                      <span className="flex items-center gap-2 text-orange-400/80"><Users size={14} /> {event.minAge}</span>
+                    )}
                     <span className="flex items-center gap-2"><Tag size={14} /> {event.category}</span>
                   </div>
                   <p className="text-sm text-white/60 leading-relaxed">{event.description}</p>
@@ -223,9 +254,9 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                               </div>
                               {!isSoldOut && !isOrganizer && (
                                 <div className="flex items-center justify-center gap-6 pt-2 border-t border-white/5">
-                                  <button onClick={() => updateTierQuantity(tier.id, -1, 10)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Minus size={14} /></button>
+                                  <button onClick={() => updateTierQuantity(tier.id, -1, tier.supply - tier.sold)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Minus size={14} /></button>
                                   <span className="w-4 text-center font-black italic text-white text-base">{q}</span>
-                                  <button onClick={() => updateTierQuantity(tier.id, 1, Math.min(10, tier.supply - tier.sold))} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Plus size={14} /></button>
+                                  <button onClick={() => updateTierQuantity(tier.id, 1, tier.supply - tier.sold)} className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"><Plus size={14} /></button>
                                 </div>
                               )}
                             </div>
@@ -273,7 +304,19 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                 </div>
               </div>
             )}
-            {step === 'confirming' && <div className="p-20 text-center"><Loader2 size={48} className="text-[var(--accent-purple)] animate-spin mx-auto mb-8" /><h3 className="text-2xl font-black uppercase tracking-tight italic mb-3 text-white">Processing…</h3><p className="text-white/40 text-sm">Please confirm the transaction in your wallet.</p></div>}
+            {step === 'confirming' && (
+              <div className="p-24 text-center min-h-[500px] flex flex-col items-center justify-center">
+                <div className="relative mb-12">
+                  <div className="absolute inset-0 bg-[var(--accent-purple)]/20 blur-3xl rounded-full animate-pulse" />
+                  <Loader2 size={80} className="text-[var(--accent-purple)] animate-spin relative z-10" />
+                </div>
+                <h3 className="text-4xl font-black uppercase tracking-tighter italic mb-4 text-white">MINTING IN PROGRESS…</h3>
+                <p className="text-white/40 text-[10px] max-w-xs mx-auto leading-relaxed uppercase tracking-[0.3em] font-black">
+                  DO NOT CLOSE THIS TAB OR REFRESH. 
+                  <br/>Your transaction is being confirmed on the blockchain.
+                </p>
+              </div>
+            )}
             {step === 'success' && <div className="p-20 text-center"><CheckCircle size={48} className="text-[var(--accent-teal)] mx-auto mb-8" /><h3 className="text-2xl font-black uppercase tracking-tight italic mb-3 text-white">Success!</h3><p className="text-white/40 text-sm mb-10">Your tickets have been minted on-chain.</p><div className="space-y-3 text-left max-w-sm mx-auto mb-10"><div className="p-4 rounded-xl bg-white/5 border border-white/10"><p className="text-[9px] uppercase tracking-widest font-black text-white/30 mb-1">Primary Token ID</p><p className="text-xs font-mono font-black text-white">#{purchasedTokenId}</p></div><div className="p-4 rounded-xl bg-white/5 border border-white/10"><p className="text-[9px] uppercase tracking-widest font-black text-white/30 mb-1">Tx Hash</p><p className="text-xs font-mono font-black text-white">{truncate(purchasedTxHash)}</p></div></div><button onClick={handleClose} className="w-full max-w-xs py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-[10px] hover:bg-[var(--accent-teal)] hover:text-white transition-all shadow-xl">Done</button></div>}
             {step === 'error' && <div className="p-20 text-center"><X size={48} className="text-red-500 mx-auto mb-8" /><h3 className="text-2xl font-black uppercase tracking-tight italic mb-3 text-red-500">Failed</h3><p className="text-white/40 text-sm mb-10 px-6">{errorMsg}</p><button onClick={() => setStep('details')} className="w-full max-w-xs py-4 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-[10px] hover:bg-red-500 hover:text-white transition-all shadow-xl">Try Again</button></div>}
           </motion.div>

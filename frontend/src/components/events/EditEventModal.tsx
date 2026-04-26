@@ -8,7 +8,7 @@ import { useEventStore, type Event } from '../../store/useEventStore';
 // On-chain editable: maxTickets, priceWei, and per-tier supplies
 // ipfsHash (name, image, metadata) is immutable after creation
 const ABI = [
-  "function editEvent(uint256 eventId, uint24 newMaxTickets, uint40 newPriceWei, uint8[] memory tierIds, uint24[] memory tierSupplies) external"
+  "function editEvent(uint256 eventId, uint24 newMaxTickets, uint256 newPriceWei, uint8[] memory tierIds, uint24[] memory tierSupplies) external"
 ];
 
 interface EditEventModalProps {
@@ -74,8 +74,8 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const numericEventId = event.id.replace('evt_', '');
-      // Contract stores lowest tier price in gwei (uint40) — same as creation logic
-      const newPriceWei = ethers.parseUnits(lowestPrice.toString(), "gwei");
+      // Contract stores price in wei
+      const newPriceWei = ethers.parseUnits(lowestPrice.toString(), "ether");
 
       // Build tier arrays for per-tier supply tracking on-chain
       const tierIds = event.tiers.map((_: any, i: number) => i);
