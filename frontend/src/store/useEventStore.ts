@@ -6,10 +6,8 @@ import { fetchFromIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint256)",
-  // Struct layout (single slot): address organiser, uint40 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps
-  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint256 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps)",
-  // Per-tier sold/max from chain (no log queries needed)
-  "function getTierData(uint256 eventId, uint8 tier) public view returns (uint24 sold, uint24 max)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps)",
+  "function getTiers(uint256 eventId) public view returns (tuple(uint256 price, uint256 maxSupply, uint256 sold)[])",
   "function isCancelled(uint256 eventId) public view returns (bool)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
@@ -51,14 +49,6 @@ async function fetchMetaCached(ipfsHash: string): Promise<any> {
 // Per-tier prices are NOT stored on-chain (only a single lowest price is).
 // When the organiser edits tier prices, we persist them here so they survive refresh.
 const TIER_PRICE_PREFIX = 'tier_prices_v1_';
-
-function getTierPriceOverrides(eventId: string): Record<number, number> | null {
-  try {
-    const raw = localStorage.getItem(TIER_PRICE_PREFIX + eventId);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
-}
 
 function setTierPriceOverrides(eventId: string, prices: Record<number, number>) {
   try {
@@ -118,29 +108,21 @@ function applyMetadata(e: Event, metadata: any): Event {
   if (!metadata) return { ...e, hasIpfsError: true };
   const tierSales = e._tierSales || {};
   const tierMaxSupplies = e._tierMaxSupplies || {};
-  const priceOverrides = getTierPriceOverrides(e.id);
+  const tierPrices = (e as any)._tierPrices || {};
+
   const tiers = (metadata.tiers && Array.isArray(metadata.tiers) && metadata.tiers.length > 0)
     ? metadata.tiers.map((t: any, tidx: number) => {
-        // On-chain supply (from getTierData max) takes priority over IPFS
+        // Source of truth is blockchain
         const onChainMax = tierMaxSupplies[tidx];
-        const supply = (onChainMax !== undefined && onChainMax > 0) ? onChainMax : (t.supply ?? e.tiers[0]?.supply);
-        // localStorage price override > On-chain base price (for tier 0) > IPFS price
-        let price = priceOverrides?.[tidx];
-        if (price === undefined) {
-          const onChainBase = e.tiers[0]?.price;
-          const ipfsBase = metadata.tiers[0]?.price;
-          
-          if (tidx === 0 && onChainBase !== undefined) {
-            price = onChainBase; // Blockchain is source of truth for base price
-          } else if (onChainBase !== undefined && ipfsBase !== undefined && onChainBase !== ipfsBase && t.price !== undefined) {
-            // Apply the same price offset to higher tiers
-            price = Math.max(0.0001, t.price + (onChainBase - ipfsBase));
-          } else {
-            price = t.price ?? onChainBase;
-          }
-        }
+        const onChainPrice = tierPrices[tidx];
+
+        const supply = (onChainMax !== undefined && onChainMax > 0) ? onChainMax : (t.supply ?? 0);
         
-        // Fix floating point precision issues (e.g., 0.0050000000000004 -> 0.005)
+        let price = (onChainPrice !== undefined && onChainPrice > 0n)
+          ? parseFloat(ethers.formatUnits(onChainPrice, "ether"))
+          : (t.price ?? 0);
+
+        // Fix floating point precision
         price = Number(Number(price).toFixed(6));
         return {
           id: t.id || `${e.id}_tier_${tidx}`,
@@ -300,51 +282,35 @@ export const useEventStore = create<EventState>((set, get) => ({
         )
       );
 
-      // Step 4: Fetch per-tier sold counts from chain via getTierData()
-      // We check tiers 0, 1, 2 (Silver, Gold, VIP) for each event
-      const MAX_TIERS = 3;
-      const tierDataPromises: Promise<Record<number, { sold: number; max: number }>>[] = 
-        onChainData.map((data, idx) => {
-          const evt = data[0];
-          if (!evt) return Promise.resolve({});
-          const eventNum = idx + 1;
-          return Promise.all(
-            Array.from({ length: MAX_TIERS }, (_, t) =>
-              contract.getTierData(eventNum, t).then((result: any) => ({
-                tier: t,
-                sold: Number(result.sold ?? result[0]),
-                max: Number(result.max ?? result[1])
-              })).catch(() => ({ tier: t, sold: 0, max: 0 }))
-            )
-          ).then(results => {
-            const map: Record<number, { sold: number; max: number }> = {};
-            for (const r of results) {
-              map[r.tier] = { sold: r.sold, max: r.max };
-            }
-            return map;
+      // Step 4: Fetch per-tier data (price, supply, sold) from chain
+      const tierDataPromises = onChainData.map((data, idx) => {
+        const evt = data[0];
+        if (!evt) return Promise.resolve({ sales: {}, supplies: {}, prices: {} });
+        const eventNum = idx + 1;
+        return contract.getTiers(eventNum).then((tiers: any[]) => {
+          const sales: Record<number, number> = {};
+          const supplies: Record<number, number> = {};
+          const prices: Record<number, bigint> = {};
+          tiers.forEach((t: any, tidx: number) => {
+            sales[tidx] = Number(t.sold);
+            supplies[tidx] = Number(t.maxSupply);
+            prices[tidx] = t.price;
           });
-        });
+          return { sales, supplies, prices };
+        }).catch(() => ({ sales: {}, supplies: {}, prices: {} }));
+      });
       const allTierData = await Promise.all(tierDataPromises);
 
       // Step 5: Build skeleton events with on-chain tier data
       const skeletonEvents: Event[] = onChainData.map((data, idx) => {
         const evt = data[0];
-        const isCancelled = data[1];
         if (!evt) return null;
         const i = idx + 1;
         const eventId = `evt_${i}`;
-        const organiser = (evt.organiser ?? evt[0]) as string;
-        if (!organiser || organiser === "0x0000000000000000000000000000000000000000") return null;
+        const organiser = data[0].organiser ?? data[0][0];
+        const isCancelled = data[1];
 
-        const onChainTotalSold = Number(evt.ticketsSold ?? evt[3]);
-        const tierData = allTierData[idx] || {};
-        // Build _tierSales and _tierMaxSupplies from on-chain data
-        const tierSales: Record<number, number> = {};
-        const tierMaxSupplies: Record<number, number> = {};
-        for (const [tierIdx, data] of Object.entries(tierData)) {
-          tierSales[Number(tierIdx)] = data.sold;
-          tierMaxSupplies[Number(tierIdx)] = data.max;
-        }
+        const tierData = allTierData[idx] || { sales: {}, supplies: {}, prices: {} };
 
         return {
           id: eventId,
@@ -354,19 +320,20 @@ export const useEventStore = create<EventState>((set, get) => ({
           location: "Loading...",
           category: "Other",
           organizerId: organiser.toLowerCase(),
-          royaltyBps: Number(evt.royaltyBps ?? evt[4]),
+          royaltyBps: Number(evt.royaltyBps ?? evt[1]),
           status: isCancelled ? 'cancelled' : 'active',
           hasIpfsError: false,
           tiers: [{
             id: `tier_${eventId}_0`,
             name: 'General Access',
-            price: parseFloat(ethers.formatUnits(evt.priceWei ?? evt[1], "ether")),
-            supply: Number(evt.maxTickets ?? evt[2]),
-            sold: onChainTotalSold
+            price: parseFloat(ethers.formatUnits(tierData.prices[0] || 0n, "ether")),
+            supply: tierData.supplies[0] || 0,
+            sold: tierData.sales[0] || 0
           }],
           txHash: eventTxHashes[eventId],
-          _tierSales: tierSales,
-          _tierMaxSupplies: tierMaxSupplies,
+          _tierSales: tierData.sales,
+          _tierMaxSupplies: tierData.supplies,
+          _tierPrices: tierData.prices,
           _ipfsHash: eventIpfsHashes[eventId],
         } as Event;
       }).filter((e): e is Event => e !== null);

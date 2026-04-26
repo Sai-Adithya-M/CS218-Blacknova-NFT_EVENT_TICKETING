@@ -7,7 +7,8 @@ import { config } from '../../config';
 import { getReadProvider } from '../../utils/blockchain';
 
 const FINANCIALS_ABI = [
-  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint256 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps)",
+  "function getTiers(uint256 eventId) public view returns (tuple(uint256 price, uint256 maxSupply, uint256 sold)[])",
   "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint256)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
   "function nextTokenId() public view returns (uint256)",
@@ -53,11 +54,13 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
       const contract = new ethers.Contract(config.contractAddress, FINANCIALS_ABI, provider);
 
       // 1. Fetch live on-chain event struct
-      const evtData = await contract.fetchEventData(numericId);
-      const priceWei = BigInt(evtData.priceWei ?? evtData[1]);
-      const maxTickets = Number(evtData.maxTickets ?? evtData[2]);
-      const ticketsSold = Number(evtData.ticketsSold ?? evtData[3]);
-      const royaltyPct = Number(evtData.royaltyBps ?? evtData[4]);
+      const [, royaltyPct] = await contract.fetchEventData(numericId);
+      
+      // 1b. Fetch Tiers for totals
+      const tierData = await contract.getTiers(numericId);
+      const totalTickets = tierData.reduce((sum: number, t: any) => sum + Number(t.maxSupply), 0);
+      const ticketsSold = tierData.reduce((sum: number, t: any) => sum + Number(t.sold), 0);
+      const firstTierPrice = tierData[0]?.price || 0n;
 
       // 2. Find all tokens belonging to this event by scanning tokenToEvent
       const nextTokenId = Number(await contract.nextTokenId());
@@ -158,8 +161,13 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
       const totalRevenueWei = primaryRevenueWei + royaltyRevenueWei;
 
       setFinancials({
-        priceWei, maxTickets, ticketsSold, royaltyPct,
-        primaryRevenueWei, royaltyRevenueWei, totalRevenueWei,
+        priceWei: BigInt(firstTierPrice), 
+        maxTickets: totalTickets, 
+        ticketsSold, 
+        royaltyPct: Number(royaltyPct),
+        primaryRevenueWei, 
+        royaltyRevenueWei, 
+        totalRevenueWei,
         deploymentCostWei,
         tierRevenues
       });

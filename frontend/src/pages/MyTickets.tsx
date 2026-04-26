@@ -84,7 +84,7 @@ export const MyTickets: React.FC = () => {
   const filteredTickets = myTickets.filter(ticket => {
     const event = events.find(e => e.id === ticket.eventId);
     const isPast = event ? new Date(event.date) < new Date() : false;
-    const isHistory = isPast || ticket.isRefunded;
+    const isHistory = isPast || ticket.isRefunded || ticket.isUsed || ticket.status === 'used';
     return activeTab === 'active' ? !isHistory : isHistory;
   });
 
@@ -367,21 +367,27 @@ export const MyTickets: React.FC = () => {
                             <img
                               src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(secureQRs[ticket.id].data)}`}
                               alt="Secure Ticket QR"
-                              className={`w-full h-full object-contain ${event?.status === 'cancelled' ? 'opacity-10 grayscale' : ''}`}
+                              className={`w-full h-full object-contain ${event?.status === 'cancelled' || ticket.isUsed || isPast ? 'opacity-10 grayscale' : ''}`}
                             />
                           ) : (
                             <div className="w-full h-full flex flex-col items-center justify-center bg-black/5 gap-2 text-center p-2">
                                <div className="w-8 h-8 rounded-full bg-[var(--accent-teal)]/10 flex items-center justify-center">
-                                  <ShieldCheck size={16} className="text-[var(--accent-teal)]" />
+                                  <ShieldCheck size={16} className={ticket.isUsed || isPast ? 'text-white/20' : 'text-[var(--accent-teal)]'} />
                                </div>
-                               <button 
-                                  onClick={() => generateSecureQR(ticket)}
-                                  disabled={isGeneratingQR === ticket.id || event?.status === 'cancelled' || ticket.status === 'resale'}
-                                  className="text-[8px] font-black uppercase tracking-widest text-[var(--accent-teal)] hover:underline disabled:opacity-30"
-                               >
-                                  {isGeneratingQR === ticket.id ? 'Signing...' : 
-                                   ticket.status === 'resale' ? 'Listed for Resale' : 'Tap to Generate Secure QR'}
-                               </button>
+                               {ticket.isUsed || isPast ? (
+                                 <span className="text-[9px] font-black uppercase tracking-widest text-white/30 italic">
+                                   {ticket.isUsed ? 'Ticket Used' : 'Event Finished'}
+                                 </span>
+                               ) : (
+                                 <button 
+                                    onClick={() => generateSecureQR(ticket)}
+                                    disabled={isGeneratingQR === ticket.id || event?.status === 'cancelled' || ticket.status === 'resale'}
+                                    className="text-[8px] font-black uppercase tracking-widest text-[var(--accent-teal)] hover:underline disabled:opacity-30"
+                                 >
+                                    {isGeneratingQR === ticket.id ? 'Signing...' : 
+                                     ticket.status === 'resale' ? 'Listed for Resale' : 'Tap to Generate Secure QR'}
+                                 </button>
+                               )}
                             </div>
                           )}
                           

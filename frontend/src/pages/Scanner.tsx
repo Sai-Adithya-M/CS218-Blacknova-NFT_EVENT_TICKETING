@@ -16,16 +16,20 @@ export const Scanner: React.FC = () => {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   useEffect(() => {
-    scannerRef.current = new Html5QrcodeScanner(
-      "reader",
-      { fps: 10, qrbox: { width: 250, height: 250 } },
-      false
-    );
-
-    scannerRef.current.render(onScanSuccess, onScanFailure);
+    if (!scannerRef.current) {
+      scannerRef.current = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        /* verbose= */ false
+      );
+      scannerRef.current.render(onScanSuccess, onScanFailure);
+    }
 
     return () => {
-      scannerRef.current?.clear().catch(console.error);
+      if (scannerRef.current) {
+        scannerRef.current.clear().catch(console.error);
+        scannerRef.current = null;
+      }
     };
   }, []);
 
@@ -60,7 +64,10 @@ export const Scanner: React.FC = () => {
       const contract = new ethers.Contract(config.contractAddress, [
         "function ownerOf(uint256) public view returns (address)",
         "function usedTickets(uint256) public view returns (bool)",
-        "function validateTicketEntry(uint256 tokenId) external"
+        "function validateTicketEntry(uint256, address) external",
+        "function fetchEventData(uint256) public view returns (address organiser, uint8 royaltyBps)",
+        "function tokenToEvent(uint256) public view returns (uint256)",
+        "function eventScanners(uint256, address) public view returns (bool)"
       ], provider);
 
       // 1. Check expiration (5 minutes = 300 seconds)
@@ -96,17 +103,56 @@ export const Scanner: React.FC = () => {
 
       // 4. On-chain validation (requires current signer to be the organizer)
       const signer = await provider.getSigner();
+      const scannerAddress = await signer.getAddress();
+      
+      // Fetch event organiser to pre-verify
+      const numericEventId = parseInt(eventId?.replace('evt_', '') || '0', 10);
+      const eventData = await contract.fetchEventData(numericEventId);
+      
+      if (eventData.organiser.toLowerCase() !== scannerAddress.toLowerCase()) {
+        // Double check authorized scanners mapping
+        const isAuthorizedScanner = await contract.eventScanners(numericEventId, scannerAddress);
+        if (!isAuthorizedScanner) {
+          throw new Error("Not authorized: You are not the organizer of this event.");
+        }
+      }
+
       const contractWithSigner = contract.connect(signer) as any;
       
-      const tx = await contractWithSigner.validateTicketEntry(data.t);
+      console.log("Submitting validation for Token:", data.t, "Attendee:", data.o);
+      const tx = await contractWithSigner.validateTicketEntry(data.t, data.o);
       await tx.wait();
 
       setVerificationStatus('success');
       toast.success("Access Granted!");
     } catch (err: any) {
-      console.error(err);
+      console.error("Verification Error:", err);
       setVerificationStatus('error');
-      setErrorMsg(err.reason || err.message || "Verification failed");
+      
+      // Extract revert reason if possible
+      let friendlyMsg = "Verification failed";
+      
+      const msg = err.message || "";
+      if (msg.includes("Already used") || msg.includes("already been used")) {
+        friendlyMsg = "Ticket has already been used for entry";
+      } else if (msg.includes("Not authorized") || msg.includes("not authorized")) {
+        friendlyMsg = "You are not authorized to scan for this event. Please use the organizer's wallet.";
+      } else if (msg.includes("Cancelled") || msg.includes("cancelled")) {
+        friendlyMsg = "This event has been cancelled. Ticket is invalid.";
+      } else if (err.message?.includes("Refunded")) {
+        friendlyMsg = "This ticket has been refunded and is no longer valid.";
+      } else if (err.reason) {
+        friendlyMsg = err.reason;
+      } else if (err.message) {
+        // Handle common ethers error structures
+        if (err.message.includes("execution reverted")) {
+          friendlyMsg = "Transaction reverted on-chain. The ticket may have already been used.";
+        } else {
+          friendlyMsg = err.message.split('(')[0].trim(); // Get the main error message
+        }
+      }
+      
+      setErrorMsg(friendlyMsg);
       toast.error("Access Denied");
     } finally {
       setIsVerifying(false);

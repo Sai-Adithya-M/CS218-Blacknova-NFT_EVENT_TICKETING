@@ -2,20 +2,20 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEventStore, type Event, type TicketTier } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, Hash, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight, Ban, Camera, MapPin, Users, ExternalLink } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight, Camera, MapPin, ExternalLink } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { EditEventModal } from '../components/events/EditEventModal';
 import { EventFinancialsModal } from '../components/events/EventFinancialsModal';
 import { CancelEventModal } from '../components/events/CancelEventModal';
+import { ScannerManagementModal } from '../components/events/ScannerManagementModal';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ethers } from 'ethers';
 import { config } from '../config';
-
 import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory ipfsHash, uint24 maxTickets, uint256 priceWei, uint8 royaltyBps, uint8[] memory tierIds, uint24[] memory tierSupplies) external",
+  "function createEvent(string memory ipfsHash, uint8 royaltyBps, uint256[] memory prices, uint256[] memory supplies) external",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
@@ -33,6 +33,7 @@ export const ManageEvents: React.FC = () => {
   const [isMining, setIsMining] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [selectedFinancials, setSelectedFinancials] = useState<Event | null>(null);
+  const [selectedScanners, setSelectedScanners] = useState<Event | null>(null);
   const [cancellingEvent, setCancellingEvent] = useState<Event | null>(null);
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -55,11 +56,8 @@ export const ManageEvents: React.FC = () => {
   const [tiers, setTiers] = useState<TierFormData[]>([
     { name: 'General', price: '', supply: '100' },
   ]);
-  const [manualAddress, setManualAddress] = useState('');
 
   if (!user) return <AuthFallback />;
-
-
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,8 +78,6 @@ export const ManageEvents: React.FC = () => {
       fileInputRef.current.value = '';
     }
   };
-
-
 
   const updateTier = (index: number, field: keyof TierFormData, value: string) => {
     setTiers(tiers.map((t, i) => i === index ? { ...t, [field]: value } : t));
@@ -120,8 +116,7 @@ export const ManageEvents: React.FC = () => {
     const eventDateObj = new Date(formData.date);
     const now = new Date();
 
-    // Compare dates by stripping seconds/milliseconds for a fairer comparison of "current" time
-    if (eventDateObj.getTime() < now.getTime() - 60000) { // Allow 1 minute grace period
+    if (eventDateObj.getTime() < now.getTime() - 60000) {
       setError("Event date cannot be in the past. Please select a future date.");
       return;
     }
@@ -140,12 +135,7 @@ export const ManageEvents: React.FC = () => {
     try {
       if (!(window as any).ethereum) throw new Error("MetaMask not found");
 
-      const totalSupply = parsedTiers.reduce((acc, t) => acc + t.supply, 0);
-      const lowestPrice = Math.min(...parsedTiers.map(t => t.price));
-
       const provider = new ethers.BrowserProvider((window as any).ethereum);
-
-      // Network Check: Ensure user is on Sepolia
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(config.sepoliaChainId)) {
         try {
@@ -161,9 +151,6 @@ export const ManageEvents: React.FC = () => {
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
-      // Contract now stores price in wei
-      const basePriceWei = ethers.parseUnits(lowestPrice.toString(), "ether");
-      // royaltyBps is 0-100 (uint8), not basis points
       const royaltyBps = Math.min(100, Math.max(0, Math.floor(parseFloat(formData.royalty || '0'))));
 
       let imageUrl = '';
@@ -189,7 +176,6 @@ export const ManageEvents: React.FC = () => {
         tiers: parsedTiers
       };
 
-      // Upload to IPFS
       let ipfsHash = "";
       try {
         ipfsHash = await uploadJSONToIPFS(metadataJSON);
@@ -197,11 +183,11 @@ export const ManageEvents: React.FC = () => {
         throw new Error("Failed to upload metadata to IPFS: " + err.message);
       }
 
-      // Build tier arrays for per-tier supply tracking on-chain
-      const tierIds = parsedTiers.map((_: any, i: number) => i);
-      const tierSuppliesArr = parsedTiers.map((t: any) => t.supply);
+      // Build tier arrays as requested by new contract design
+      const supplies = parsedTiers.map((t: any) => BigInt(t.supply));
+      const prices = parsedTiers.map((t: any) => ethers.parseUnits(t.price.toString(), "ether"));
 
-      const tx = await contract.createEvent(ipfsHash, totalSupply, basePriceWei, royaltyBps, tierIds, tierSuppliesArr);
+      const tx = await contract.createEvent(ipfsHash, royaltyBps, prices, supplies);
       const receipt = await tx.wait();
 
       let blockchainEventId = `evt_${Date.now()}`;
@@ -228,7 +214,6 @@ export const ManageEvents: React.FC = () => {
 
       const signerAddress = await signer.getAddress();
       
-      // Calculate deployment cost
       let deploymentCost = "0";
       let gasUsedStr = "0";
       if (receipt) {
@@ -274,9 +259,7 @@ export const ManageEvents: React.FC = () => {
         locationLink: '',
       });
       
-      // Redirect to Marketplace after success
       navigate('/events');
-      
       setTiers([{ name: 'General', price: '', supply: '100' }]);
       setImageFile(null);
       setImagePreview(null);
@@ -355,25 +338,6 @@ export const ManageEvents: React.FC = () => {
               <p className="text-sm text-white/60 font-medium leading-relaxed">
                 Update VITE_CONTRACT_ADDRESS in your .env file.
               </p>
-            </div>
-            <div className="flex flex-col gap-2 min-w-[300px]">
-              <div className="p-3 rounded-xl bg-black/40 border border-white/10">
-                <p className="text-[8px] font-black uppercase tracking-widest text-white/30 mb-2">Manual Connection:</p>
-                <div className="flex gap-2">
-                  <input
-                    value={manualAddress}
-                    onChange={(e) => setManualAddress(e.target.value)}
-                    placeholder="0x..."
-                    className="flex-1 bg-white/5 border border-white/10 rounded-lg py-1.5 px-3 text-[10px] font-mono text-white focus:border-[var(--accent-teal)] outline-none"
-                  />
-                  <button
-                    onClick={() => alert(`Connect Address: ${manualAddress}`)}
-                    className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[8px] font-black uppercase"
-                  >
-                    Connect
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </motion.div>
@@ -473,7 +437,6 @@ export const ManageEvents: React.FC = () => {
                         value={formData.royalty}
                         onChange={e => {
                           const val = e.target.value;
-                          // Allow empty or only integers
                           if (val === '' || /^\d+$/.test(val)) {
                             setFormData({ ...formData, royalty: val });
                           }
@@ -500,7 +463,7 @@ export const ManageEvents: React.FC = () => {
                           <MapPin size={16} />
                         </div>
                         <input
-                          placeholder="Venue Name (e.g. Madison Square Garden)"
+                          placeholder="Venue Name"
                           className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
                           value={formData.venueName}
                           onChange={e => setFormData({ ...formData, venueName: e.target.value })}
@@ -511,7 +474,7 @@ export const ManageEvents: React.FC = () => {
                           <MapPin size={16} className="opacity-40" />
                         </div>
                         <input
-                          placeholder="City / Address (e.g. New York, NY)"
+                          placeholder="City / Address"
                           className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
                           value={formData.location}
                           onChange={e => setFormData({ ...formData, location: e.target.value })}
@@ -524,43 +487,12 @@ export const ManageEvents: React.FC = () => {
                         <ExternalLink size={16} />
                       </div>
                       <input
-                        placeholder="Location Link (e.g. Google Maps URL)"
+                        placeholder="Location Link"
                         className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
                         value={formData.locationLink}
                         onChange={e => setFormData({ ...formData, locationLink: e.target.value })}
                       />
                     </div>
-                    
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-[9px] font-black uppercase tracking-widest text-white/40 ml-1 flex items-center gap-1.5">
-                          <Users size={10} className="text-[var(--accent-purple)]" /> Minimum Entry Age
-                        </label>
-                        <select
-                          className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-bold text-white/80 text-sm cursor-pointer hover:bg-white/[0.08]"
-                          value={formData.minAge}
-                          onChange={e => setFormData({ ...formData, minAge: e.target.value })}
-                        >
-                          <option value="All ages" className="bg-[#12121a]">All ages</option>
-                          <option value="13+" className="bg-[#12121a]">13+</option>
-                          <option value="16+" className="bg-[#12121a]">16+</option>
-                          <option value="18+" className="bg-[#12121a]">18+</option>
-                          <option value="21+" className="bg-[#12121a]">21+</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-2">
-                         <label className="text-[9px] font-black uppercase tracking-widest text-white/40 ml-1 flex items-center gap-1.5">
-                          <Camera size={10} className="text-[var(--accent-teal)]" /> Security Level
-                        </label>
-                        <div className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 px-4 text-xs font-bold text-white/30 flex items-center gap-2 cursor-not-allowed">
-                          <ShieldCheck size={14} className="text-[var(--accent-teal)]/40" />
-                          Encrypted QR Gates
-                        </div>
-                      </div>
-                    </div>
-
-
                   </div>
                 </section>
 
@@ -584,7 +516,7 @@ export const ManageEvents: React.FC = () => {
                       <div key={index} className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-3 mb-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[9px] font-black uppercase tracking-widest text-white/30">
-                            {index === 0 ? 'General Tier Details' : `Tier #${index + 1} Details`}
+                            {index === 0 ? 'General Tier' : `Tier #${index + 1}`}
                           </span>
                           {index > 0 && (
                             <button
@@ -599,18 +531,18 @@ export const ManageEvents: React.FC = () => {
                         <div className="grid grid-cols-3 gap-3">
                           <input
                             required
-                            placeholder="Tier Name"
-                            className="bg-white/5 border border-white/10 rounded-lg py-2.5 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all text-sm font-bold text-white placeholder:text-white/20"
+                            placeholder="Name"
+                            className="bg-white/5 border border-white/10 rounded-lg py-2.5 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all text-sm font-bold text-white"
                             value={tier.name}
                             onChange={e => updateTier(index, 'name', e.target.value)}
                           />
                           <input
                             type="number"
-                            step="0.001"
+                            step="0.0001"
                             min="0"
                             required
                             placeholder="Price (ETH)"
-                            className="bg-white/5 border border-white/10 rounded-lg py-2.5 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all text-sm font-bold text-white placeholder:text-white/20"
+                            className="bg-white/5 border border-white/10 rounded-lg py-2.5 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all text-sm font-bold text-white"
                             value={tier.price}
                             onChange={e => updateTier(index, 'price', e.target.value)}
                           />
@@ -619,7 +551,7 @@ export const ManageEvents: React.FC = () => {
                             min="1"
                             required
                             placeholder="Supply"
-                            className="bg-white/5 border border-white/10 rounded-lg py-2.5 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all text-sm font-bold text-white placeholder:text-white/20"
+                            className="bg-white/5 border border-white/10 rounded-lg py-2.5 px-3 focus:outline-none focus:border-[var(--accent-teal)] transition-all text-sm font-bold text-white"
                             value={tier.supply}
                             onChange={e => updateTier(index, 'supply', e.target.value)}
                           />
@@ -630,7 +562,7 @@ export const ManageEvents: React.FC = () => {
                 </section>
 
                 <section className="space-y-4">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">5. Media Upload</h3>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 italic">5. Media</h3>
                   <div
                     onClick={() => fileInputRef.current?.click()}
                     className="p-6 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center gap-4 cursor-pointer hover:bg-white/[0.04] transition-all relative overflow-hidden min-h-[160px]"
@@ -652,7 +584,7 @@ export const ManageEvents: React.FC = () => {
                     ) : (
                       <>
                         <Upload className="text-white/20" size={24} />
-                        <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image (Optional)</span>
+                        <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image</span>
                       </>
                     )}
                     <input
@@ -679,7 +611,7 @@ export const ManageEvents: React.FC = () => {
               <div className="glass-panel p-8 rounded-3xl border border-white/10 bg-white/[0.03]">
                 <h3 className="text-lg font-black uppercase italic tracking-tight mb-4">Launch on Web3</h3>
                 <p className="text-sm text-white/50 font-medium leading-relaxed mb-6">
-                  ERC-721 NFTs on Sepolia testnet. <span className="text-[var(--accent-teal)] block mt-2 text-[10px] font-bold uppercase italic">Note: Transactions typically take 10-20 seconds to confirm.</span>
+                  ERC-721 NFTs on Sepolia testnet.
                 </p>
                 <div className="space-y-3">
                   {[
@@ -731,7 +663,6 @@ export const ManageEvents: React.FC = () => {
               </div>
             ) : events
               .filter(e => e.organizerId?.toLowerCase() === (user.walletAddress || user.id)?.toLowerCase())
-
               .filter(event => {
                 const isPast = new Date(event.date) < new Date();
                 const isHistory = isPast || event.status === 'cancelled';
@@ -741,7 +672,6 @@ export const ManageEvents: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {events
                   .filter(e => e.organizerId?.toLowerCase() === (user.walletAddress || user.id)?.toLowerCase())
-
                   .filter(event => {
                     const isPast = new Date(event.date) < new Date();
                     const isHistory = isPast || event.status === 'cancelled';
@@ -767,12 +697,22 @@ export const ManageEvents: React.FC = () => {
                         </div>
                       )}
                       
-                      {event.status === 'cancelled' && (
-                        <div className="w-full mt-2 py-3 rounded-xl bg-orange-500/5 border border-orange-500/20 text-orange-500/80 text-[10px] font-black uppercase tracking-widest flex justify-center items-center gap-2">
-                          <Ban size={14} /> Cancelled
-                        </div>
-                      )}
-                      <div className="grid grid-cols-1 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <button
+                            onClick={() => setSelectedScanners(event)}
+                            className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06] hover:border-[var(--accent-purple)]/40 transition-all group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-[var(--accent-purple)]/10 rounded-xl text-[var(--accent-purple)] group-hover:scale-110 transition-transform">
+                                <ShieldCheck size={16} />
+                              </div>
+                              <div className="text-left">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-white">Manage Scanners</p>
+                              </div>
+                            </div>
+                            <ArrowUpRight size={14} className="text-white/20 group-hover:text-[var(--accent-purple)]" />
+                          </button>
+
                           <button
                             onClick={() => setSelectedFinancials(event)}
                             className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06] hover:border-[var(--accent-teal)]/40 transition-all group"
@@ -783,7 +723,6 @@ export const ManageEvents: React.FC = () => {
                               </div>
                               <div className="text-left">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-white">Event Financials</p>
-                                <p className="text-[8px] text-white/30 uppercase tracking-tighter">View Revenue & Profit</p>
                               </div>
                             </div>
                             <ArrowUpRight size={14} className="text-white/20 group-hover:text-[var(--accent-teal)]" />
@@ -796,43 +735,21 @@ export const ManageEvents: React.FC = () => {
                             <Camera size={16} />
                             Open Gate Scanner
                           </button>
-                            <div className="p-3 rounded-xl bg-black/40 border border-white/5">
-                              <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                                <Hash size={8} /> Event ID
-                              </p>
-                              <code className="text-[10px] font-mono font-bold text-white/60">{event.id}</code>
-                            </div>
-                            <div className="p-3 rounded-xl bg-black/40 border border-white/5">
-                              <p className="text-[8px] font-black uppercase tracking-tight text-white/20 mb-1 flex items-center gap-1">
-                                <ShieldCheck size={8} /> Contract
-                              </p>
-                              <div className="flex items-center justify-between">
-                                <code className="text-[10px] font-mono font-bold text-white/60">
-                                  {config.contractAddress.slice(0, 6)}...
-                                </code>
-                              </div>
-                            </div>
-                          </div>
                         </div>
-                      ))}
-                  </div>
-              ) : (
-                <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-dashed border-white/10 text-center p-8">
-                  <LayoutDashboard size={48} className="mb-4 text-white/10" />
-                  <p className="text-lg font-black uppercase italic tracking-widest text-white/30 mb-2">
-                    {manageTab === 'active' ? 'No Active Events' : 'No Past Events'}
-                  </p>
-                  <p className="text-sm text-white/20">
-                    {manageTab === 'active'
-                      ? 'Click "Create New Event" to launch your first experience.'
-                      : 'Your concluded events will show up here as historical records.'}
-                  </p>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center glass-panel rounded-[2.5rem] border border-dashed border-white/10 text-center p-8">
+                <LayoutDashboard size={48} className="mb-4 text-white/10" />
+                <p className="text-lg font-black uppercase italic tracking-widest text-white/30 mb-2">
+                  {manageTab === 'active' ? 'No Active Events' : 'No Past Events'}
+                </p>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
 
       {editingEventId && events.find(e => e.id === editingEventId) && (
         <EditEventModal
@@ -845,6 +762,15 @@ export const ManageEvents: React.FC = () => {
         <EventFinancialsModal
           eventId={selectedFinancials.id}
           onClose={() => setSelectedFinancials(null)}
+        />
+      )}
+
+      {selectedScanners && (
+        <ScannerManagementModal
+          isOpen={!!selectedScanners}
+          onClose={() => setSelectedScanners(null)}
+          eventId={selectedScanners.id}
+          eventName={selectedScanners.title}
         />
       )}
 

@@ -8,7 +8,7 @@ import { useEventStore, type Event } from '../../store/useEventStore';
 // On-chain editable: maxTickets, priceWei, and per-tier supplies
 // ipfsHash (name, image, metadata) is immutable after creation
 const ABI = [
-  "function editEvent(uint256 eventId, uint24 newMaxTickets, uint256 newPriceWei, uint8[] memory tierIds, uint24[] memory tierSupplies) external"
+  "function editEvent(uint256 eventId, uint256[] memory newPrices, uint256[] memory newSupplies) external"
 ];
 
 interface EditEventModalProps {
@@ -25,8 +25,8 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
   const [tierSupplies, setTierSupplies] = useState<number[]>(
     event.tiers.map(t => t.supply)
   );
-  const [tierPrices, setTierPrices] = useState<number[]>(
-    event.tiers.map(t => t.price)
+  const [tierPrices, setTierPrices] = useState<string[]>(
+    event.tiers.map(t => t.price.toString())
   );
 
   const totalSold = event.tiers.reduce((sum, t) => sum + t.sold, 0);
@@ -47,7 +47,7 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
     setTierSupplies(prev => prev.map((s, i) => i === index ? value : s));
   };
 
-  const updateTierPrice = (index: number, value: number) => {
+  const updateTierPrice = (index: number, value: string) => {
     setTierPrices(prev => prev.map((p, i) => i === index ? value : p));
   };
 
@@ -74,19 +74,13 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
       const contract = new ethers.Contract(config.contractAddress, ABI, signer);
 
       const numericEventId = event.id.replace('evt_', '');
-      // Contract stores price in wei
-      const newPriceWei = ethers.parseUnits(lowestPrice.toString(), "ether");
-
-      // Build tier arrays for per-tier supply tracking on-chain
-      const tierIds = event.tiers.map((_: any, i: number) => i);
-      const tierSuppliesOnChain = tierSupplies;
+      const newPrices = tierPrices.map(p => ethers.parseUnits(p || "0", "ether"));
+      const newSupplies = tierSupplies.map(s => BigInt(s));
 
       const tx = await contract.editEvent(
         numericEventId,
-        newTotalSupply,       // uint24 — sum of all tier supplies
-        newPriceWei,          // uint40 — lowest tier price
-        tierIds,              // uint8[] — tier indices
-        tierSuppliesOnChain   // uint24[] — per-tier supply
+        newPrices,
+        newSupplies
       );
       await tx.wait();
 
@@ -192,10 +186,10 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({ event, onClose }
                           <input
                             type="number"
                             step="0.0001"
-                            min="0.0001"
+                            min="0"
                             required
                             value={tierPrices[idx]}
-                            onChange={e => updateTierPrice(idx, Number(e.target.value))}
+                            onChange={e => updateTierPrice(idx, e.target.value)}
                             className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-sm ${
                               tierPriceErrors[idx] ? 'border-red-500/50 focus:border-red-500' : 'border-white/10 focus:border-[var(--accent-teal)]'
                             }`}

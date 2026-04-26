@@ -14,8 +14,8 @@ import { ethers } from 'ethers';
 import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
-  "function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) public payable",
-  "function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) public payable",
+  "function buyTicket(uint256 eventId, uint256 tierId) public payable",
+  "function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
   "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)"
