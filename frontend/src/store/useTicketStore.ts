@@ -18,7 +18,7 @@ const ABI = [
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
   "event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei)",
-  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice)",
   "event ListingCancelled(uint256 indexed tokenId)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];

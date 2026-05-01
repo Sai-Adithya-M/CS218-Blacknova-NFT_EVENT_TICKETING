@@ -14,7 +14,7 @@ const FINANCIALS_ABI = [
   "function nextTokenId() public view returns (uint256)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)",
-  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei)",
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice)",
 ];
 
 interface ChainFinancials {

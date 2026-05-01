@@ -12,13 +12,17 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     // Strict constraint: Max 10 tickets per batch
     uint24 public constant MAX_BATCH = 10;
 
-    // ── Event struct: Optimized into 1 storage slot ──────────────────────
-    // address(160) + uint64 priceWei(64) + uint24 maxTickets(24) + uint8 royalty(8) = 256 bits
+    // ── Tier struct: Each event can have multiple tiers ──────────────────
+    struct Tier {
+        uint256 price;
+        uint256 maxSupply;
+        uint256 sold;
+    }
+
+    // ── Event struct: Core event data ────────────────────────────────────
     struct Event {
         address organiser;   
-        uint64 priceWei;     // Compact wei price (supports up to 18.4 ETH)
-        uint24 maxTickets;   
-        uint8  royaltyBps;
+        uint8   royaltyBps;
     }
 
     // ── TokenData: Optimized into 1 storage slot ────────────────────────────
@@ -41,6 +45,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     }
 
     mapping(uint256 => Event) public events;
+    mapping(uint256 => Tier[]) public eventTiers;
     mapping(uint256 => TokenData) internal _tokenData; 
     mapping(uint256 => ResaleListing) public resaleListings;
     
@@ -60,80 +65,80 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     error BatchLimitExceeded();
     error MaxTiersExceeded();
     error NotAuthorizedScanner();
+    error AlreadyUsed();
+    error InvalidToken();
+    error WrongAttendee();
 
-    mapping(uint256 => mapping(uint8 => uint24)) public tierTicketsSold;
-    mapping(uint256 => mapping(uint8 => uint24)) public tierMaxTickets;
+    // Legacy mappings removed in favor of eventTiers
 
     event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash);
     event EventUpdated(uint256 indexed eventId, uint24 newMaxTickets, uint256 newPriceWei);
     event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier);
     event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 priceWei);
-    event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei);
+    event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice);
     event ListingCancelled(uint256 indexed tokenId);
     event EventCancelled(uint256 indexed eventId);
     event RefundClaimed(uint256 indexed tokenId, address indexed user, uint256 amount);
     event ScannerAdded(uint256 indexed eventId, address indexed scanner);
     event ScannerRemoved(uint256 indexed eventId, address indexed scanner);
+    event TicketValidated(uint256 indexed tokenId, address indexed attendee, address indexed validator, uint256 timestamp);
 
     constructor() ERC721("NFTEventTicket", "NETIX") {}
 
     function createEvent(
         string memory ipfsHash,
-        uint24 maxTickets,
-        uint64 priceWei,
         uint8 royaltyBps,
-        uint8[] memory tierIds,
-        uint24[] memory tierSupplies
+        uint256[] memory prices,
+        uint256[] memory supplies
     ) external {
-        require(maxTickets > 0, "Must have tickets");
         require(bytes(ipfsHash).length > 0, "IPFS hash required");
-        require(priceWei > 0, "Price must be > 0");
         require(royaltyBps <= 100, "Royalty <= 100%");
-        require(tierIds.length == tierSupplies.length, "Tier mismatch");
-        require(tierIds.length <= 3, "Max 3 tiers allowed");
+        require(prices.length == supplies.length, "Tier mismatch");
+        require(prices.length > 0, "At least one tier required");
+        require(prices.length <= 5, "Max 5 tiers allowed"); // Reasonable limit
 
         uint256 eventId = nextEventId;
         events[eventId] = Event({
-            organiser:   msg.sender,
-            priceWei:    priceWei,
-            maxTickets:  maxTickets,
-            royaltyBps:  royaltyBps
+            organiser: msg.sender,
+            royaltyBps: royaltyBps
         });
 
-        for (uint256 i = 0; i < tierIds.length; ) {
-            tierMaxTickets[eventId][tierIds[i]] = tierSupplies[i];
-            unchecked { i++; }
+        for (uint256 i = 0; i < prices.length; i++) {
+            eventTiers[eventId].push(Tier(prices[i], supplies[i], 0));
         }
 
-        unchecked { nextEventId++; }
         emit EventCreated(eventId, msg.sender, ipfsHash);
+        nextEventId++;
     }
 
     function editEvent(
         uint256 eventId,
-        uint24 newMaxTickets,
-        uint64 newPriceWei,
-        uint8[] memory tierIds,
-        uint24[] memory tierSupplies
+        uint256[] memory newPrices,
+        uint256[] memory newSupplies
     ) external {
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event non-existent");
         if (msg.sender != evt.organiser) revert NotEventOrganiser();
-        require(newMaxTickets >= eventTicketsSold[eventId], "Below sold");
-        require(newPriceWei > 0, "Price must be > 0");
-        require(tierIds.length == tierSupplies.length, "Tier mismatch");
-        require(tierIds.length <= 3, "Max 3 tiers allowed");
+        require(newPrices.length == newSupplies.length, "Tier mismatch");
+        require(newPrices.length == eventTiers[eventId].length, "Cannot change tier count");
 
-        evt.maxTickets = newMaxTickets;
-        evt.priceWei = newPriceWei;
-
-        for (uint256 i = 0; i < tierIds.length; ) {
-            require(tierSupplies[i] >= tierTicketsSold[eventId][tierIds[i]], "Tier below sold");
-            tierMaxTickets[eventId][tierIds[i]] = tierSupplies[i];
-            unchecked { i++; }
+        for (uint256 i = 0; i < newPrices.length; i++) {
+            Tier storage t = eventTiers[eventId][i];
+            require(newSupplies[i] >= t.sold, "Below sold");
+            t.price = newPrices[i];
+            t.maxSupply = newSupplies[i];
         }
 
-        emit EventUpdated(eventId, newMaxTickets, newPriceWei);
+        emit EventUpdated(eventId, 0, newPrices[0]);
+    }
+
+    function getTiers(uint256 eventId) external view returns (Tier[] memory) {
+        return eventTiers[eventId];
+    }
+
+    function getTier(uint256 eventId, uint256 tierId) external view returns (Tier memory) {
+        require(tierId < eventTiers[eventId].length, "Invalid tierId");
+        return eventTiers[eventId][tierId];
     }
 
     function addScanner(uint256 eventId, address scanner) external {
@@ -149,91 +154,93 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit ScannerRemoved(eventId, scanner);
     }
 
-    function buyTicket(uint256 eventId, uint24 quantity, uint8 tier) external payable nonReentrant {
-        require(quantity > 0 && quantity <= MAX_BATCH, "Invalid quantity");
+    function buyTicket(uint256 eventId, uint256 tierId) external payable nonReentrant {
         if (isCancelled[eventId]) revert EventIsCancelled();
 
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event non-existent");
-        require(eventTicketsSold[eventId] + quantity <= evt.maxTickets, "Sold out");
         require(msg.sender != evt.organiser, "Organiser buy error");
+        require(tierId < eventTiers[eventId].length, "Invalid tierId");
 
-        uint24 tierMax = tierMaxTickets[eventId][tier];
-        if (tierMax > 0) {
-            require(tierTicketsSold[eventId][tier] + quantity <= tierMax, "Tier sold out");
-        }
+        Tier storage t = eventTiers[eventId][tierId];
+        require(t.sold < t.maxSupply, "Sold out");
+        require(msg.value == t.price, "Insufficient payment");
 
-        require(msg.value >= uint256(evt.priceWei) * quantity, "Insufficient payment");
+        uint256 tokenId = nextTokenId;
+        uint80 nonce = uint80(uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, msg.sender, tokenId))));
+        
+        _mint(msg.sender, tokenId);
+        _tokenData[tokenId] = TokenData({
+            eventId: uint32(eventId),
+            tier: uint8(tierId),
+            originalPrice: uint64(msg.value),
+            lastPricePaid: uint64(msg.value),
+            refunded: false,
+            nonce: nonce
+        });
 
-        uint64 computedPrice = uint64(msg.value / quantity);
-        uint32 eid = uint32(eventId);
-
-        for (uint256 i = 0; i < quantity; ) {
-            uint256 tokenId = nextTokenId;
-            uint80 nonce = uint80(uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, msg.sender, tokenId))));
-            _mint(msg.sender, tokenId);
-            _tokenData[tokenId] = TokenData(eid, tier, computedPrice, computedPrice, false, nonce);
-
-            emit TicketMinted(tokenId, eventId, msg.sender, tier);
-            unchecked { nextTokenId++; i++; }
-        }
-
-        eventTicketsSold[eventId] += quantity;
-        tierTicketsSold[eventId][tier] += quantity;
+        t.sold++;
+        eventTicketsSold[eventId]++;
         eventRefundLiability[eventId] += msg.value;
         
+        emit TicketMinted(tokenId, eventId, msg.sender, uint8(tierId));
+        nextTokenId++;
+
         (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
     }
 
-    function buyBatchTickets(uint256 eventId, uint8[] memory tiers, uint24[] memory quantities) external payable nonReentrant {
-        require(tiers.length == quantities.length, "Input mismatch");
+    function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) external payable nonReentrant {
+        require(tierIds.length == quantities.length, "Input mismatch");
         if (isCancelled[eventId]) revert EventIsCancelled();
 
         Event storage evt = events[eventId];
         require(evt.organiser != address(0), "Event non-existent");
         require(msg.sender != evt.organiser, "Organiser buy error");
 
-        uint24 totalQuantity = 0;
-        for (uint256 i = 0; i < quantities.length; ) {
-            totalQuantity += quantities[i];
-            unchecked { i++; }
+        uint256 totalRequired = 0;
+        for (uint256 i = 0; i < tierIds.length; i++) {
+            uint256 tId = tierIds[i];
+            require(tId < eventTiers[eventId].length, "Invalid tierId");
+            Tier storage t = eventTiers[eventId][tId];
+            require(t.sold + quantities[i] <= t.maxSupply, "Tier sold out");
+            totalRequired += t.price * quantities[i];
         }
-        require(totalQuantity > 0 && totalQuantity <= MAX_BATCH, "Invalid quantity");
-        require(eventTicketsSold[eventId] + totalQuantity <= evt.maxTickets, "Sold out");
-        require(msg.value >= uint256(evt.priceWei) * totalQuantity, "Insufficient payment");
+        require(msg.value == totalRequired, "Incorrect payment");
 
-        uint64 computedPrice = uint64(msg.value / totalQuantity);
-        uint32 eid = uint32(eventId);
+        for (uint256 j = 0; j < tierIds.length; j++) {
+            uint256 tId = tierIds[j];
+            uint24 qty = quantities[j];
+            Tier storage t = eventTiers[eventId][tId];
 
-        for (uint256 t = 0; t < tiers.length; ) {
-            uint24 qty = quantities[t];
-            uint8 tier = tiers[t];
-            
-            uint24 tierMax = tierMaxTickets[eventId][tier];
-            if (tierMax > 0) {
-                require(tierTicketsSold[eventId][tier] + qty <= tierMax, "Tier sold out");
-            }
-
-            for (uint256 i = 0; i < qty; ) {
+            for (uint256 i = 0; i < qty; i++) {
                 uint256 tokenId = nextTokenId;
                 uint80 nonce = uint80(uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, msg.sender, tokenId))));
                 _mint(msg.sender, tokenId);
-                _tokenData[tokenId] = TokenData(eid, tier, computedPrice, computedPrice, false, nonce);
+                _tokenData[tokenId] = TokenData({
+                    eventId: uint32(eventId),
+                    tier: uint8(tId),
+                    originalPrice: uint64(t.price),
+                    lastPricePaid: uint64(t.price),
+                    refunded: false,
+                    nonce: nonce
+                });
 
-                emit TicketMinted(tokenId, eventId, msg.sender, tier);
-                unchecked { nextTokenId++; i++; }
+                emit TicketMinted(tokenId, eventId, msg.sender, uint8(tId));
+                nextTokenId++;
             }
-
-            tierTicketsSold[eventId][tier] += qty;
-            unchecked { t++; }
+            t.sold += qty;
+            eventTicketsSold[eventId] += qty;
         }
 
-        eventTicketsSold[eventId] += totalQuantity;
         eventRefundLiability[eventId] += msg.value;
-        
         (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
         require(success, "Transfer failed");
+    }
+
+    function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps) {
+        Event storage evt = events[eventId];
+        return (evt.organiser, evt.royaltyBps);
     }
 
     function listForResale(uint256 tokenId, uint256 priceWei) external {
@@ -241,10 +248,11 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         require(ownerOf(tokenId) == msg.sender, "Not owner");
         require(priceWei > 0, "Price must be > 0");
 
-        uint256 basePrice = uint256(_tokenData[tokenId].lastPricePaid);
-        uint8 royalty = events[_tokenData[tokenId].eventId].royaltyBps;
-        uint256 maxPrice = basePrice + (basePrice * (uint256(royalty) + 10) / 100);
-        require(priceWei <= maxPrice, "Price exceeds cap");
+        // Cap is always based on the original mint price, not last resale price.
+        // This prevents compounding / exponential price growth across resales.
+        uint256 origPrice = uint256(_tokenData[tokenId].originalPrice);
+        uint256 maxResalePrice = origPrice + (origPrice * 10 / 100);
+        require(priceWei <= maxResalePrice, "Resale price exceeds allowed cap");
 
         resaleListings[tokenId] = ResaleListing({
             seller: msg.sender,
@@ -287,7 +295,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         _tokenData[tokenId].lastPricePaid = uint64(msg.value);
         
         eventRefundLiability[eventId] = eventRefundLiability[eventId] - oldPrice + msg.value;
-        emit TicketResold(tokenId, listing.seller, msg.sender, msg.value);
+        emit TicketResold(tokenId, listing.seller, msg.sender, msg.value, uint256(_tokenData[tokenId].originalPrice));
     }
 
     function cancelResaleListing(uint256 tokenId) external {
@@ -322,17 +330,53 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit RefundClaimed(tokenId, msg.sender, refundAmount);
     }
 
-    function validateTicketEntry(uint256 tokenId) external {
+    /**
+     * @notice Validates a ticket entry on-chain.
+     * @param tokenId The ID of the ticket being scanned.
+     * @param expectedAttendee The address of the person presenting the ticket (owner).
+     */
+    function validateTicketEntry(uint256 tokenId, address expectedAttendee) external nonReentrant {
+        _validateTicketInternal(tokenId, expectedAttendee);
+    }
+
+    /**
+     * @notice Validates multiple tickets in one transaction for gas optimization.
+     * @param tokenIds Array of ticket IDs.
+     * @param expectedAttendees Array of owner addresses matching the token IDs.
+     */
+    function validateBatch(uint256[] calldata tokenIds, address[] calldata expectedAttendees) external nonReentrant {
+        require(tokenIds.length == expectedAttendees.length, "Length mismatch");
+        for (uint256 i = 0; i < tokenIds.length; ) {
+            _validateTicketInternal(tokenIds[i], expectedAttendees[i]);
+            unchecked { i++; }
+        }
+    }
+
+    /**
+     * @dev Internal validation logic to minimize gas and prevent duplication.
+     */
+    function _validateTicketInternal(uint256 tokenId, address expectedAttendee) internal {
+        // 1. Basic checks
         uint256 eventId = uint256(_tokenData[tokenId].eventId);
-        // Organiser or Authorized Scanner
-        require(
-            msg.sender == events[eventId].organiser || eventScanners[eventId][msg.sender], 
-            "Not authorized"
-        );
-        require(!usedTickets[tokenId], "Already used");
-        require(!isCancelled[eventId], "Cancelled");
-        require(!_tokenData[tokenId].refunded, "Refunded");
+        if (eventId == 0) revert InvalidToken();
+
+        // 2. Authorization: Caller must be organiser or approved scanner
+        if (msg.sender != events[eventId].organiser && !eventScanners[eventId][msg.sender]) {
+            revert NotAuthorizedScanner();
+        }
+
+        // 3. Status checks
+        if (usedTickets[tokenId]) revert AlreadyUsed();
+        if (isCancelled[eventId]) revert EventIsCancelled();
+        if (_tokenData[tokenId].refunded) revert AlreadyRefunded();
+
+        // 4. Ownership check: Ensure the attendee currently owns the ticket
+        if (ownerOf(tokenId) != expectedAttendee) revert WrongAttendee();
+
+        // 5. Mark as used
         usedTickets[tokenId] = true;
+
+        emit TicketValidated(tokenId, expectedAttendee, msg.sender, block.timestamp);
     }
 
     function getTokenPurchasePrice(uint256 tokenId) public view returns (uint256) {
@@ -363,17 +407,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         return _tokenData[tokenId].refunded;
     }
 
-    function fetchEventData(uint256 eventId) public view returns (address organiser, uint256 priceWei, uint24 maxTickets, uint24 ticketsSold, uint8 royaltyBps) {
-        Event memory evt = events[eventId];
-        return (evt.organiser, evt.priceWei, evt.maxTickets, eventTicketsSold[eventId], evt.royaltyBps);
-    }
-
     function getResaleListing(uint256 tokenId) public view returns (ResaleListing memory) {
         return resaleListings[tokenId];
-    }
-
-    function getTierData(uint256 eventId, uint8 tier) public view returns (uint24 sold, uint24 max) {
-        return (tierTicketsSold[eventId][tier], tierMaxTickets[eventId][tier]);
     }
 
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
