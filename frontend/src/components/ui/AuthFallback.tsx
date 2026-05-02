@@ -18,16 +18,16 @@ export const AuthFallback: React.FC<AuthFallbackProps> = ({
 
   return (
     <>
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 text-center relative">
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 text-center relative pt-32">
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           className="glass-panel p-12 rounded-[3rem] border border-white/10 max-w-xl relative overflow-hidden"
         >
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--accent-purple)]/10 rounded-full blur-3xl" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl" />
           
-          <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-8 shadow-inner">
-            <Wallet size={36} className="text-[var(--accent-purple)]" />
+          <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/20 flex items-center justify-center mx-auto mb-8 shadow-[0_0_30px_rgba(255,255,255,0.05)]">
+            <Wallet size={36} className="text-white" />
           </div>
 
           <h2 className="text-3xl font-black uppercase italic tracking-tighter mb-4">{title}</h2>

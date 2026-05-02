@@ -123,7 +123,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
             {step === 'choose' && (
               <>
                 <div className="text-center mb-8">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[var(--accent-purple)] to-[var(--accent-teal)] flex items-center justify-center mx-auto mb-4">
+                  <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/20 flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_rgba(255,255,255,0.05)]">
                     <Wallet size={26} className="text-white" />
                   </div>
                   <h2 className="text-2xl font-black uppercase tracking-tight italic mb-2">Connect to NETIX</h2>
@@ -134,9 +134,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   {/* MetaMask */}
                   <button
                     onClick={connectMetaMask}
-                    className="w-full flex items-center gap-4 py-4 px-5 rounded-2xl bg-[#F6851B]/10 border border-[#F6851B]/30 hover:bg-[#F6851B]/20 hover:border-[#F6851B]/60 text-white font-bold transition-all group"
+                    className="w-full flex items-center gap-4 py-4 px-5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/30 text-white font-bold transition-all group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-[#F6851B] flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                    <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                       <Wallet size={20} className="text-white" />
                     </div>
                     <div className="text-left">
@@ -159,8 +159,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
             {/* ── CONNECTING ── */}
             {step === 'connecting' && (
               <div className="text-center py-8">
-                <div className="w-16 h-16 rounded-2xl bg-[#F6851B]/10 border border-[#F6851B]/30 flex items-center justify-center mx-auto mb-6">
-                  <Loader2 size={32} className="text-[#F6851B] animate-spin" />
+                <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/20 flex items-center justify-center mx-auto mb-6">
+                  <Loader2 size={32} className="text-white animate-spin" />
                 </div>
                 <h3 className="text-xl font-black uppercase tracking-tight italic mb-3">
                   {loginMethod === 'metamask' 
@@ -173,7 +173,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                     : 'Authenticating your account securely.'}
                 </p>
                 <div className="mt-6 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest text-white/30">
-                  <span className="w-2 h-2 rounded-full bg-[#F6851B] animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                   Waiting for confirmation
                 </div>
               </div>
