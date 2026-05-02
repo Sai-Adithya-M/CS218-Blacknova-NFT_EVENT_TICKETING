@@ -17,6 +17,7 @@ const CONTRACT_ABI = [
   "function buyTicket(uint256 eventId, uint256 tierId) public payable",
   "function buyTicketWithReferral(uint256 eventId, uint256 tierId, address referrer) public payable",
   "function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) public payable",
+  "function buyBatchTicketsWithReferral(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
   "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice)"
@@ -132,30 +133,18 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
         && referrerAddress.toLowerCase() !== user.id?.toLowerCase()
         && referrerAddress.toLowerCase() !== event.organizerId?.toLowerCase();
 
-      // If only 1 tier with qty=1 and valid referrer, use single buyTicketWithReferral
+      // Use referral-aware contract calls when a valid referrer is present
+      let tx;
       if (isValidReferrer && tierIndices.length === 1 && tierQtys[0] === 1) {
-        const tx = await contract.buyTicketWithReferral(numericEventId, tierIndices[0], referrerAddress, { value: totalValue });
-        const receipt = await tx.wait();
-        const mintedIds: string[] = [];
-        if (receipt && receipt.logs) {
-          receipt.logs.forEach((log: any) => {
-            try {
-              const parsed = contract.interface.parseLog(log);
-              if (parsed && parsed.name === 'TicketMinted') mintedIds.push(parsed.args.tokenId.toString());
-            } catch (e) {}
-          });
-        }
-        const tId = mintedIds[0] || Date.now().toString();
-        const tier = event.tiers[tierIndices[0]];
-        buyTicket(event.id, user.id, tier.name, tier.price, tId, receipt.hash);
-        incrementTierSold(event.id, tier.id);
-        setPurchasedTokenId(tId);
-        setPurchasedTxHash(receipt.hash);
-        setStep('success');
-        return;
+        // Single ticket + referrer: use the dedicated single-ticket referral function
+        tx = await contract.buyTicketWithReferral(numericEventId, tierIndices[0], referrerAddress, { value: totalValue });
+      } else if (isValidReferrer) {
+        // Multiple tickets + referrer: use batch with referral
+        tx = await contract.buyBatchTicketsWithReferral(numericEventId, tierIndices, tierQtys, referrerAddress, { value: totalValue });
+      } else {
+        // No referrer: standard batch purchase
+        tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
       }
-
-      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
       const receipt = await tx.wait();
 
       const mintedIds: string[] = [];

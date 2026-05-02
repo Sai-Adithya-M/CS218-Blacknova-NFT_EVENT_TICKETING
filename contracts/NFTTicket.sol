@@ -221,6 +221,14 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     }
 
     function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) external payable nonReentrant {
+        _buyBatchInternal(eventId, tierIds, quantities, address(0));
+    }
+
+    function buyBatchTicketsWithReferral(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) external payable nonReentrant {
+        _buyBatchInternal(eventId, tierIds, quantities, referrer);
+    }
+
+    function _buyBatchInternal(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) internal {
         require(tierIds.length == quantities.length, "Input mismatch");
         if (isCancelled[eventId]) revert EventIsCancelled();
 
@@ -264,7 +272,20 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         }
 
         eventRefundLiability[eventId] += msg.value;
-        (bool success, ) = payable(evt.organiser).call{value: msg.value}("");
+
+        // Handle referral payment
+        uint256 organiserAmount = msg.value;
+        if (referrer != address(0) && referrer != evt.organiser && referrer != msg.sender && eventReferrals[eventId][referrer] > 0) {
+            uint256 referralBps = eventReferrals[eventId][referrer];
+            uint256 referrerAmount = (msg.value * referralBps) / 10000;
+            organiserAmount = msg.value - referrerAmount;
+
+            (bool successRef, ) = payable(referrer).call{value: referrerAmount}("");
+            require(successRef, "Referral transfer failed");
+            emit ReferralPaid(eventId, referrer, referrerAmount);
+        }
+
+        (bool success, ) = payable(evt.organiser).call{value: organiserAmount}("");
         require(success, "Transfer failed");
     }
 
