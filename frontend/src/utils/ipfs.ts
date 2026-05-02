@@ -56,7 +56,6 @@ export async function fetchFromIPFS(
 
   const attemptGateway = async (baseUrl: string) => {
     const url = `${baseUrl}/${cid}`;
-    // Build headers — add Pinata JWT if hitting Pinata's gateway
     const headers: HeadersInit = {};
     if (baseUrl.includes('pinata.cloud') && PINATA_JWT) {
       headers['Authorization'] = `Bearer ${PINATA_JWT}`;
@@ -66,7 +65,7 @@ export async function fetchFromIPFS(
       const response = await fetch(url, { 
         signal: controller.signal,
         method,
-        mode: 'cors',   // Explicit CORS mode — drops non-CORS responses cleanly
+        mode: 'cors',
         headers,
       });
       if (!response.ok) throw new Error(`Gateway ${baseUrl} returned ${response.status}`);
@@ -76,7 +75,6 @@ export async function fetchFromIPFS(
       return data;
     } catch (e) {
       if (returnUrl) {
-        // Some gateways block HEAD; fall back to GET for probing
         try {
           const retryRes = await fetch(url, { signal: controller.signal, mode: 'cors', headers });
           if (retryRes.ok) return url;
@@ -86,10 +84,10 @@ export async function fetchFromIPFS(
     }
   };
 
-
-  // Tier 0: Pinata + ipfs.io — tried immediately (fastest, CORS guaranteed)
-  // Tier 1: nftstorage + cloudflare — staggered 600ms
-  // Tier 2: dweb.link — staggered 2.5s fallback
+  // Aggressive staggered racing for speed
+  // Tier 0: Pinata + ipfs.io — instant
+  // Tier 1: nftstorage + cloudflare — staggered 300ms
+  // Tier 2: dweb.link — staggered 800ms
   const tiers = [
     IPFS_GATEWAYS.slice(0, 2),
     IPFS_GATEWAYS.slice(2, 4),
@@ -99,8 +97,8 @@ export async function fetchFromIPFS(
   try {
     const allPromises = [
       ...tiers[0].map(gw => attemptGateway(gw)),
-      ...tiers[1].map(gw => new Promise(r => setTimeout(r, 600)).then(() => attemptGateway(gw))),
-      ...tiers[2].map(gw => new Promise(r => setTimeout(r, 2500)).then(() => attemptGateway(gw))),
+      ...tiers[1].map(gw => new Promise(r => setTimeout(r, 300)).then(() => attemptGateway(gw))),
+      ...tiers[2].map(gw => new Promise(r => setTimeout(r, 800)).then(() => attemptGateway(gw))),
     ];
 
     const result = await Promise.any(allPromises);

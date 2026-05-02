@@ -393,7 +393,7 @@ export const Home: React.FC = () => {
       <section className="px-6 py-28 bg-gradient-to-b from-white/[0.01] to-transparent border-t border-white/5">
         <div className="px-12 grid lg:grid-cols-2 gap-20 items-center">
           <div>
-            <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">The Nifting Advantage</p>
+            <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-teal)] mb-4 italic">The NETIX Advantage</p>
             <h2 className="text-5xl font-black uppercase tracking-tighter italic leading-tight mb-12">
               Beyond Just<br />A Digital Ticket.
             </h2>

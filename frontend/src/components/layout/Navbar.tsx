@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Menu, X, Wallet, Sparkles, ChevronDown, LogOut, LayoutDashboard, User, Plus, Calendar } from 'lucide-react';
+import { Menu, X, Wallet, Store, ChevronDown, LogOut, LayoutDashboard, User, Plus, Calendar } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { LoginModal } from '../ui/LoginModal';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -47,7 +47,7 @@ export const Navbar: React.FC = () => {
   }, []);
 
   const navLinks = [
-    { name: 'Marketplace', path: '/events', icon: <Sparkles size={13}/> },
+    { name: 'Marketplace', path: '/events', icon: <Store size={13}/> },
     { name: 'My Tickets', path: '/tickets', icon: <Calendar size={13}/> },
     { name: 'Create Event', path: '/manage', icon: <Plus size={13}/> },
   ];
@@ -120,7 +120,7 @@ export const Navbar: React.FC = () => {
               <motion.button 
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
-                className="px-5 py-2 rounded-xl bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)] text-white text-[11px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-[var(--accent-purple)]/20"
+                className="px-5 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/90 hover:text-white text-[11px] font-black uppercase tracking-widest flex items-center gap-2 transition-all"
                 onClick={() => setIsLoginOpen(true)}
               >
                 <Wallet size={14} />
@@ -223,7 +223,7 @@ export const Navbar: React.FC = () => {
                     <User size={14} /> Login / Sign Up
                   </button>
                   <button 
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-[var(--accent-purple)] to-[var(--accent-teal)] text-white text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                    className="w-full py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/90 hover:text-white text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all"
                     onClick={() => { setIsOpen(false); setIsLoginOpen(true); }}
                   >
                     <Wallet size={14} /> Connect MetaMask

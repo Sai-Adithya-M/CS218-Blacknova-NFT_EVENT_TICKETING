@@ -15,7 +15,9 @@ import { useIPFSImage } from '../../hooks/useIPFSImage';
 
 const CONTRACT_ABI = [
   "function buyTicket(uint256 eventId, uint256 tierId) public payable",
+  "function buyTicketWithReferral(uint256 eventId, uint256 tierId, address referrer) public payable",
   "function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) public payable",
+  "function buyBatchTicketsWithReferral(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
   "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice)"
@@ -93,7 +95,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      const totalValue = ethers.parseEther(totalPrice.toFixed(18));
       const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1;
       
       const tierIndices: number[] = [];
@@ -107,8 +108,43 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
         }
       });
 
+      // Use exact BigInt wei prices from on-chain data to avoid floating-point
+      // precision errors (e.g. 0.001 * 3 = 0.0030000000000000004 in JS)
+      const rawTierPrices = (event as any)._tierPrices as Record<number, bigint> | undefined;
+      let totalValue: bigint;
+      if (rawTierPrices && Object.keys(rawTierPrices).length > 0) {
+        totalValue = tierIndices.reduce((sum, tidx, i) => {
+          const priceWei = rawTierPrices[tidx] ?? 0n;
+          return sum + priceWei * BigInt(tierQtys[i]);
+        }, 0n);
+      } else {
+        // Fallback: convert each tier price individually to avoid compound fp error
+        totalValue = tierIndices.reduce((sum, tidx, i) => {
+          const tier = event.tiers[tidx];
+          const priceWei = ethers.parseEther(tier.price.toFixed(18));
+          return sum + priceWei * BigInt(tierQtys[i]);
+        }, 0n);
+      }
 
-      const tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
+      // Check for referral in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const referrerAddress = urlParams.get('ref');
+      const isValidReferrer = referrerAddress && /^0x[a-fA-F0-9]{40}$/.test(referrerAddress)
+        && referrerAddress.toLowerCase() !== user.id?.toLowerCase()
+        && referrerAddress.toLowerCase() !== event.organizerId?.toLowerCase();
+
+      // Use referral-aware contract calls when a valid referrer is present
+      let tx;
+      if (isValidReferrer && tierIndices.length === 1 && tierQtys[0] === 1) {
+        // Single ticket + referrer: use the dedicated single-ticket referral function
+        tx = await contract.buyTicketWithReferral(numericEventId, tierIndices[0], referrerAddress, { value: totalValue });
+      } else if (isValidReferrer) {
+        // Multiple tickets + referrer: use batch with referral
+        tx = await contract.buyBatchTicketsWithReferral(numericEventId, tierIndices, tierQtys, referrerAddress, { value: totalValue });
+      } else {
+        // No referrer: standard batch purchase
+        tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
+      }
       const receipt = await tx.wait();
 
       const mintedIds: string[] = [];

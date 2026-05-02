@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import { useTicketStore } from '../store/useTicketStore';
 import { useEventStore } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, Loader2, ShieldCheck, Users } from 'lucide-react';
+import { Ticket as TicketIcon, Share2, Ban, ExternalLink, Calendar, MapPin, Hash, Clock, Tag, Loader2, ShieldCheck, Users, Download } from 'lucide-react';
 import { AuthFallback } from '../components/ui/AuthFallback';
 import { ResaleModal } from '../components/events/ResaleModal';
 import { motion } from 'framer-motion';
@@ -206,6 +206,118 @@ export const MyTickets: React.FC = () => {
     visible: { opacity: 1, x: 0, transition: { duration: 0.5, ease: "easeOut" } }
   };
 
+  const downloadTicketCard = async (ticket: any, event: any) => {
+    const qrData = secureQRs[ticket.id]?.data;
+    if (!qrData) {
+      toast.error('Generate the secure QR first, then download.');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    const w = 420;
+    const h = 620;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#0a0a1a');
+    grad.addColorStop(1, '#1a1030');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, 24);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(140, 59, 254, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(1, 1, w - 2, h - 2, 24);
+    ctx.stroke();
+
+    // Header
+    ctx.fillStyle = '#7c3aed';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.letterSpacing = '3px';
+    ctx.fillText('NETIX · NFT TICKET', 30, 40);
+
+    // Event title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.letterSpacing = '0px';
+    const title = (event?.title || 'Event').substring(0, 28);
+    ctx.fillText(title, 30, 80);
+
+    // Tier
+    ctx.fillStyle = '#00d4aa';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(ticket.tierName || 'General', 30, 110);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(30, 130);
+    ctx.lineTo(w - 30, 130);
+    ctx.stroke();
+
+    // Info rows
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '11px sans-serif';
+    const eventDate = event ? new Date(event.date) : null;
+    ctx.fillText('DATE', 30, 160);
+    ctx.fillText('LOCATION', 220, 160);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(eventDate ? eventDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD', 30, 180);
+    ctx.fillText((event?.location || 'TBD').substring(0, 16), 220, 180);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('TOKEN ID', 30, 215);
+    ctx.fillText('PRICE', 220, 215);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(`#${ticket.tokenId}`, 30, 235);
+    ctx.fillStyle = '#00d4aa';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`${ticket.tierPrice} ETH`, 220, 235);
+
+    // Load QR image
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}`;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const qrSize = 220;
+      const qrX = (w - qrSize) / 2;
+      const qrY = 270;
+      // White background for QR
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.roundRect(qrX - 12, qrY - 12, qrSize + 24, qrSize + 24, 16);
+      ctx.fill();
+      ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
+
+      // Footer
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Scan this QR at the venue gate for entry', w / 2, qrY + qrSize + 45);
+      ctx.fillStyle = 'rgba(140,59,254,0.6)';
+      ctx.fillText('Secured by Ethereum · Sepolia Testnet', w / 2, qrY + qrSize + 65);
+
+      // Download
+      const link = document.createElement('a');
+      link.download = `NETIX-Ticket-${ticket.tokenId}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      toast.success('Ticket downloaded!');
+    };
+    img.onerror = () => toast.error('Failed to load QR for download.');
+    img.src = qrUrl;
+  };
+
   return (
     <motion.div
       initial="hidden"
@@ -402,6 +514,16 @@ export const MyTickets: React.FC = () => {
                            <div className="bg-[var(--accent-teal)]/10 text-[7px] font-black uppercase text-[var(--accent-teal)] py-1.5 px-3 rounded-lg border border-[var(--accent-teal)]/20 animate-pulse whitespace-nowrap">
                               Valid for: {Math.max(0, Math.ceil((secureQRs[ticket.id].expiresAt - Math.floor(Date.now() / 1000)) / 60))}m left
                            </div>
+                        )}
+
+                        {secureQRs[ticket.id] && (
+                          <button
+                            onClick={() => downloadTicketCard(ticket, event)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-purple)]/10 border border-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-[8px] font-black uppercase tracking-widest hover:bg-[var(--accent-purple)]/20 transition-all"
+                          >
+                            <Download size={10} />
+                            Download Ticket
+                          </button>
                         )}
                       </div>
 
