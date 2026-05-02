@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Menu, X, Wallet, Sparkles, ChevronDown, LogOut, LayoutDashboard, User, Plus, Calendar } from 'lucide-react';
+import { Menu, X, Wallet, Store, ChevronDown, LogOut, LayoutDashboard, User, Plus, Calendar } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { LoginModal } from '../ui/LoginModal';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -47,7 +47,7 @@ export const Navbar: React.FC = () => {
   }, []);
 
   const navLinks = [
-    { name: 'Marketplace', path: '/events', icon: <Sparkles size={13}/> },
+    { name: 'Marketplace', path: '/events', icon: <Store size={13}/> },
     { name: 'My Tickets', path: '/tickets', icon: <Calendar size={13}/> },
     { name: 'Create Event', path: '/manage', icon: <Plus size={13}/> },
   ];

@@ -1,10 +1,10 @@
 export const config = {
   // Exact contract address verified on Sepolia Etherscan
-  contractAddress: import.meta.env.VITE_CONTRACT_ADDRESS || "0xCc7AC6b5A7123781463aeec00EEeD0DD21f12705",
+  contractAddress: import.meta.env.VITE_CONTRACT_ADDRESS || "0x4ba4BCF64eC2eB5C99310b75cb969EF8345F4ff2",
   sepoliaChainId: 11155111,
   // Using a cluster of reliable public RPC nodes
   sepoliaRpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
-  // Deployment Block updated to stay within 50k block range: 10680000
-  deploymentBlock: 10730000,
+  // Deployment Block updated for new contract deployment (May 2, 2026)
+  deploymentBlock: 10760000,
 
 };

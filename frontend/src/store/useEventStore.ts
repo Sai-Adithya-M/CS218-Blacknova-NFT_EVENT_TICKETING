@@ -6,18 +6,22 @@ import { fetchFromIPFS } from '../utils/ipfs';
 
 const ABI = [
   "function nextEventId() public view returns (uint256)",
-  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps, uint8 maxResaleMarkupPct)",
   "function getTiers(uint256 eventId) public view returns (tuple(uint256 price, uint256 maxSupply, uint256 sold)[])",
   "function isCancelled(uint256 eventId) public view returns (bool)",
   "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
 ];
 
-// ─── IPFS Metadata Cache (localStorage) ───────────────────────────────────────
-// Key: CID string → Value: parsed JSON metadata (or null if known-bad)
-const CACHE_PREFIX = 'ipfs_meta_v1_';
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// ─── IPFS Metadata Cache (localStorage + in-memory) ─────────────────────────────
+const CACHE_PREFIX = 'ipfs_meta_v2_';
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — IPFS content is immutable
+
+// In-memory cache for zero-latency repeat reads within same session
+const memCache = new Map<string, any>();
 
 function cacheGet(cid: string): any | undefined {
+  // Check memory first (instant)
+  if (memCache.has(cid)) return memCache.get(cid);
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + cid);
     if (!raw) return undefined;
@@ -26,22 +30,47 @@ function cacheGet(cid: string): any | undefined {
       localStorage.removeItem(CACHE_PREFIX + cid);
       return undefined;
     }
-    return data; // may be null (known-bad marker)
+    // Promote to memory cache
+    memCache.set(cid, data);
+    return data;
   } catch { return undefined; }
 }
 
 function cacheSet(cid: string, data: any) {
+  memCache.set(cid, data); // Always set in memory (instant reads)
   try {
     localStorage.setItem(CACHE_PREFIX + cid, JSON.stringify({ ts: Date.now(), data }));
-  } catch { /* quota exceeded — ignore */ }
+  } catch { /* quota exceeded — memory cache still works */ }
 }
+
+// Deduplicate inflight requests — if 5 cards request the same CID, only 1 network call
+const inflightRequests = new Map<string, Promise<any>>();
 
 async function fetchMetaCached(ipfsHash: string): Promise<any> {
   const cached = cacheGet(ipfsHash);
   if (cached !== undefined) return cached; // null = known-bad, non-null = good data
-  const result = await fetchFromIPFS(ipfsHash, { json: true, timeout: 20000 });
-  cacheSet(ipfsHash, result ?? null); // cache null to avoid re-hitting bad CIDs
-  return result;
+
+  // Deduplicate: return existing promise if already in-flight
+  if (inflightRequests.has(ipfsHash)) return inflightRequests.get(ipfsHash);
+
+  const promise = fetchFromIPFS(ipfsHash, { json: true, timeout: 12000 })
+    .then(result => {
+      cacheSet(ipfsHash, result ?? null);
+      inflightRequests.delete(ipfsHash);
+      return result;
+    })
+    .catch(() => {
+      inflightRequests.delete(ipfsHash);
+      return null;
+    });
+
+  inflightRequests.set(ipfsHash, promise);
+  return promise;
+}
+
+// Pre-cache: called after event creation to cache metadata instantly
+export function preCacheIPFSMetadata(cid: string, metadata: any) {
+  cacheSet(cid, metadata);
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -86,7 +115,10 @@ export interface Event {
   txHash?: string;
   _tierSales?: Record<number, number>;
   _tierMaxSupplies?: Record<number, number>; 
-  _ipfsHash?: string; 
+  _tierPrices?: Record<number, bigint>;
+  _ipfsHash?: string;
+  _ipfsHydrated?: boolean;
+  maxResaleMarkupPct?: number;
 }
 
 interface EventState {
@@ -302,6 +334,7 @@ export const useEventStore = create<EventState>((set, get) => ({
       const allTierData = await Promise.all(tierDataPromises);
 
       // Step 5: Build skeleton events with on-chain tier data
+      // Apply cached IPFS metadata SYNCHRONOUSLY so repeat visitors see hydrated cards instantly
       const skeletonEvents: Event[] = onChainData.map((data, idx) => {
         const evt = data[0];
         if (!evt) return null;
@@ -311,8 +344,9 @@ export const useEventStore = create<EventState>((set, get) => ({
         const isCancelled = data[1];
 
         const tierData = allTierData[idx] || { sales: {}, supplies: {}, prices: {} };
+        const ipfsHash = eventIpfsHashes[eventId];
 
-        return {
+        let skeleton: Event = {
           id: eventId,
           title: `Event #${i}`,
           description: "Loading details from IPFS...",
@@ -321,6 +355,7 @@ export const useEventStore = create<EventState>((set, get) => ({
           category: "Other",
           organizerId: organiser.toLowerCase(),
           royaltyBps: Number(evt.royaltyBps ?? evt[1]),
+          maxResaleMarkupPct: Number(evt.maxResaleMarkupPct ?? evt[2] ?? 10),
           status: isCancelled ? 'cancelled' : 'active',
           hasIpfsError: false,
           tiers: [{
@@ -334,36 +369,56 @@ export const useEventStore = create<EventState>((set, get) => ({
           _tierSales: tierData.sales,
           _tierMaxSupplies: tierData.supplies,
           _tierPrices: tierData.prices,
-          _ipfsHash: eventIpfsHashes[eventId],
+          _ipfsHash: ipfsHash,
         } as Event;
+
+        // Instant hydration from cache (sync — no network call)
+        if (ipfsHash) {
+          const cached = cacheGet(ipfsHash);
+          if (cached) {
+            skeleton = applyMetadata(skeleton, cached);
+            skeleton._ipfsHydrated = true; // Mark so Phase 2 skips it
+          }
+        }
+
+        return skeleton;
       }).filter((e): e is Event => e !== null);
 
-      // Step 5: Fetch ALL IPFS metadata in parallel (cache-first)
-      //   - Events with a valid cache hit resolve immediately
-      //   - Events not yet cached fire network requests in parallel
-      const metadataResults = await Promise.all(
-        skeletonEvents.map(e =>
-          e._ipfsHash
-            ? fetchMetaCached(e._ipfsHash).catch(() => null)
-            : Promise.resolve(null)
-        )
-      );
+      // ── Phase 1: Show events IMMEDIATELY from chain data ──────────────────
+      // Users see cards with price, supply, tier info right away.
+      // Titles show "Event #N" until IPFS hydrates them.
+      set({ events: skeletonEvents, isLoading: false });
+      console.log(`EventStore: ${skeletonEvents.length} events shown from chain (IPFS hydrating in background)`);
 
-      // Step 6: Merge metadata into events (single pass, no re-render churn)
-      const hydratedEvents: Event[] = skeletonEvents.map((e, idx) =>
-        applyMetadata(e, metadataResults[idx])
-      );
+      // ── Phase 2: Hydrate IPFS metadata progressively (non-blocking) ────
+      // Each event hydrates independently — fast-cached ones appear first,
+      // slow network ones fill in as they arrive. No waiting for all.
+      skeletonEvents.forEach((e, idx) => {
+        if (!e._ipfsHash || (e as any)._ipfsHydrated) return; // Skip cached ones
 
-      console.log(`EventStore: ${hydratedEvents.filter(e => !e.hasIpfsError).length}/${hydratedEvents.length} events fully hydrated from IPFS`);
-      set({ events: hydratedEvents, isLoading: false });
-
-      // Step 7: Schedule retries only for events that still failed IPFS fetch
-      hydratedEvents.forEach(e => {
-        if (e.hasIpfsError && e._ipfsHash) {
-          // Remove bad cache entry so retry can try fresh
-          try { localStorage.removeItem(CACHE_PREFIX + e._ipfsHash); } catch {}
-          setTimeout(() => get().retryMetadata(e.id, e._ipfsHash!, 0), 3000);
-        }
+        fetchMetaCached(e._ipfsHash)
+          .then(metadata => {
+            if (metadata) {
+              set(state => ({
+                events: state.events.map(ev =>
+                  ev.id === e.id ? applyMetadata(ev, metadata) : ev
+                )
+              }));
+            } else {
+              // Mark as error, schedule retry
+              set(state => ({
+                events: state.events.map(ev =>
+                  ev.id === e.id ? { ...ev, hasIpfsError: true } : ev
+                )
+              }));
+              try { localStorage.removeItem(CACHE_PREFIX + e._ipfsHash); } catch {}
+              setTimeout(() => get().retryMetadata(e.id, e._ipfsHash!, 0), 3000);
+            }
+          })
+          .catch(() => {
+            try { localStorage.removeItem(CACHE_PREFIX + e._ipfsHash!); } catch {}
+            setTimeout(() => get().retryMetadata(e.id, e._ipfsHash!, 0), 3000);
+          });
       });
 
     } catch (err) {

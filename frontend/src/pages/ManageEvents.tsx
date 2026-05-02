@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useEventStore, type Event, type TicketTier } from '../store/useEventStore';
+import { useEventStore, type Event, type TicketTier, preCacheIPFSMetadata } from '../store/useEventStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight, Camera, MapPin, ExternalLink } from 'lucide-react';
+import { Plus, LayoutDashboard, Upload, CheckCircle2, Layers, ShieldCheck, X as XIcon, Loader2, AlertCircle, Trash2, PieChart, ArrowUpRight, Camera, MapPin, ExternalLink, Link2, Copy } from 'lucide-react';
 import { EventCard } from '../components/events/EventCard';
 import { EditEventModal } from '../components/events/EditEventModal';
 import { EventFinancialsModal } from '../components/events/EventFinancialsModal';
@@ -15,8 +15,10 @@ import { config } from '../config';
 import { uploadJSONToIPFS, uploadToIPFS } from '../utils/ipfs';
 
 const ABI = [
-  "function createEvent(string memory ipfsHash, uint8 royaltyBps, uint256[] memory prices, uint256[] memory supplies) external",
-  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)"
+  "function createEvent(string memory ipfsHash, uint8 royaltyBps, uint256[] memory prices, uint256[] memory supplies, uint8 maxResaleMarkupPct) external",
+  "function addReferral(uint256 eventId, address referrer, uint256 bps) external",
+  "event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash)",
+  "event ReferralAdded(uint256 indexed eventId, address indexed referrer, uint256 bps)"
 ];
 
 interface TierFormData {
@@ -41,6 +43,11 @@ export const ManageEvents: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Referral state
+  const [referralInputs, setReferralInputs] = useState<Record<string, { address: string, bps: string }>>({});
+  const [generatedLinks, setGeneratedLinks] = useState<Record<string, string>>({});
+  const [isAddingReferral, setIsAddingReferral] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -48,6 +55,7 @@ export const ManageEvents: React.FC = () => {
     location: '',
     category: 'Music',
     royalty: '5',
+    resaleMarkup: '10',
     minAge: 'All ages',
     venueName: '',
     locationLink: '',
@@ -179,6 +187,8 @@ export const ManageEvents: React.FC = () => {
       let ipfsHash = "";
       try {
         ipfsHash = await uploadJSONToIPFS(metadataJSON);
+        // Pre-cache: metadata is now instantly available on next page load
+        preCacheIPFSMetadata(ipfsHash, metadataJSON);
       } catch (err: any) {
         throw new Error("Failed to upload metadata to IPFS: " + err.message);
       }
@@ -186,8 +196,9 @@ export const ManageEvents: React.FC = () => {
       // Build tier arrays as requested by new contract design
       const supplies = parsedTiers.map((t: any) => BigInt(t.supply));
       const prices = parsedTiers.map((t: any) => ethers.parseUnits(t.price.toString(), "ether"));
+      const resaleMarkup = Math.min(100, Math.max(0, Math.floor(parseFloat(formData.resaleMarkup || '10'))));
 
-      const tx = await contract.createEvent(ipfsHash, royaltyBps, prices, supplies);
+      const tx = await contract.createEvent(ipfsHash, royaltyBps, prices, supplies, resaleMarkup);
       const receipt = await tx.wait();
 
       let blockchainEventId = `evt_${Date.now()}`;
@@ -254,6 +265,7 @@ export const ManageEvents: React.FC = () => {
         location: '',
         category: 'Music',
         royalty: '5',
+        resaleMarkup: '10',
         minAge: 'All ages',
         venueName: '',
         locationLink: '',
@@ -273,6 +285,41 @@ export const ManageEvents: React.FC = () => {
       }
     } finally {
       setIsMining(false);
+    }
+  };
+
+  const handleAddReferral = async (eventId: string) => {
+    const inputs = referralInputs[eventId];
+    if (!inputs || !/^0x[a-fA-F0-9]{40}$/.test(inputs.address)) {
+      setError("Invalid Ethereum address for referral.");
+      return;
+    }
+    const pct = parseFloat(inputs.bps);
+    if (isNaN(pct) || pct < 0.01 || pct > 50) {
+      setError("Referral % must be between 0.01 and 50.");
+      return;
+    }
+
+    setIsAddingReferral(eventId);
+    setError(null);
+    try {
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(config.contractAddress, ABI, signer);
+      
+      const numericEventId = parseInt(eventId.replace('evt_', ''), 10) || 1;
+      // Convert percentage to basis points (e.g. 5% => 500)
+      const bps = Math.floor(pct * 100);
+      const tx = await contract.addReferral(numericEventId, inputs.address, bps);
+      await tx.wait();
+
+      const link = `${window.location.origin}/events?event=${eventId}&ref=${inputs.address}`;
+      setGeneratedLinks(prev => ({ ...prev, [eventId]: link }));
+    } catch (err: any) {
+      console.error(err);
+      setError(err.reason || err.message || "Failed to add referral.");
+    } finally {
+      setIsAddingReferral(null);
     }
   };
 
@@ -439,6 +486,31 @@ export const ManageEvents: React.FC = () => {
                           const val = e.target.value;
                           if (val === '' || /^\d+$/.test(val)) {
                             setFormData({ ...formData, royalty: val });
+                          }
+                        }}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/20">%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="flex-1">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-orange-400 italic mb-1">Max Resale Markup (%)</h4>
+                      <p className="text-[9px] text-white/30 font-medium">How much above original price can resellers list (0-100%).</p>
+                    </div>
+                    <div className="w-24 relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${(parseInt(formData.resaleMarkup) > 100 || parseInt(formData.resaleMarkup) < 0) ? 'border-red-500/50' : 'border-white/10 focus:border-orange-400'
+                          }`}
+                        value={formData.resaleMarkup}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === '' || /^\d+$/.test(val)) {
+                            setFormData({ ...formData, resaleMarkup: val });
                           }
                         }}
                       />
@@ -736,6 +808,64 @@ export const ManageEvents: React.FC = () => {
                             Open Gate Scanner
                           </button>
                         </div>
+
+                        {/* Referral Program Section */}
+                        {manageTab === 'active' && event.status !== 'cancelled' && (
+                          <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
+                            <div className="flex items-center gap-2">
+                              <Link2 size={14} className="text-[var(--accent-purple)]" />
+                              <h4 className="text-[9px] font-black uppercase tracking-widest text-[var(--accent-purple)] italic">Referral Program</h4>
+                            </div>
+                            
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <input 
+                                placeholder="Referrer Wallet (0x...)"
+                                className="flex-1 bg-black/40 border border-white/5 rounded-xl py-2.5 px-3 text-xs font-mono text-white focus:border-[var(--accent-purple)] outline-none placeholder:text-white/20"
+                                value={referralInputs[event.id]?.address || ''}
+                                onChange={e => setReferralInputs(prev => ({ ...prev, [event.id]: { ...prev[event.id], address: e.target.value } }))}
+                              />
+                              <div className="relative w-full sm:w-24">
+                                <input 
+                                  placeholder="%"
+                                  type="number"
+                                  min="0.01"
+                                  max="50"
+                                  step="0.01"
+                                  className="w-full bg-black/40 border border-white/5 rounded-xl py-2.5 px-3 text-xs text-center font-bold text-white focus:border-[var(--accent-purple)] outline-none placeholder:text-white/20"
+                                  value={referralInputs[event.id]?.bps || ''}
+                                  onChange={e => setReferralInputs(prev => ({ ...prev, [event.id]: { ...prev[event.id], bps: e.target.value } }))}
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-white/30">%</span>
+                              </div>
+                              <button
+                                disabled={isAddingReferral === event.id}
+                                onClick={() => handleAddReferral(event.id)}
+                                className="px-5 py-2.5 rounded-xl bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-[9px] font-black uppercase tracking-widest hover:bg-[var(--accent-purple)]/30 transition-all disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+                              >
+                                <Link2 size={12} />
+                                {isAddingReferral === event.id ? 'Registering...' : 'Generate Link'}
+                              </button>
+                            </div>
+
+                            {generatedLinks[event.id] && (
+                              <div className="p-3 rounded-xl bg-[var(--accent-teal)]/5 border border-[var(--accent-teal)]/20 flex flex-col sm:flex-row items-center gap-3">
+                                <code className="flex-1 text-[9px] font-mono text-[var(--accent-teal)] truncate w-full sm:w-auto select-all">
+                                  {generatedLinks[event.id]}
+                                </code>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(generatedLinks[event.id]);
+                                    setError(null);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-[8px] font-black uppercase shrink-0 flex items-center gap-1.5 hover:bg-[var(--accent-teal)]/30 transition-all"
+                                >
+                                  <Copy size={10} />
+                                  Copy Link
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                     </div>
                   ))}
               </div>

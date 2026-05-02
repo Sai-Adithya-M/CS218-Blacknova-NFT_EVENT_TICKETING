@@ -8,7 +8,7 @@ const ABI = [
   "function ownerOf(uint256 tokenId) public view returns (address)",
   "function tokenToEvent(uint256 tokenId) public view returns (uint256)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
-  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps, uint8 maxResaleMarkupPct)",
   "function getResaleListing(uint256 tokenId) public view returns (address seller, uint256 priceWei, bool active)",
   "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint256)",
   "function getTokenLastPricePaid(uint256 tokenId) public view returns (uint256)",
