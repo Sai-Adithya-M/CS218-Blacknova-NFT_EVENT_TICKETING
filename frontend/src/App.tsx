@@ -11,6 +11,7 @@ import { ManageEvents } from './pages/ManageEvents';
 import { MyTickets } from './pages/MyTickets';
 import { Wallet } from './pages/Wallet';
 import { Dashboard } from './pages/Dashboard';
+import { Scanner } from './pages/Scanner';
 import { useEventStore } from './store/useEventStore';
 import { useTicketStore } from './store/useTicketStore';
 import { useAuthStore } from './store/useAuthStore';
@@ -83,6 +84,7 @@ function AppContent() {
           <Route path="/tickets" element={<AppLayout><PageTransition><MyTickets /></PageTransition></AppLayout>} />
           <Route path="/wallet" element={<AppLayout><PageTransition><Wallet /></PageTransition></AppLayout>} />
           <Route path="/manage/*" element={<AppLayout><PageTransition><ManageEvents /></PageTransition></AppLayout>} />
+          <Route path="/scan/:eventId" element={<AppLayout><PageTransition><Scanner /></PageTransition></AppLayout>} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -81,9 +81,9 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
             <Sparkles size={10} />
             Verified
           </span>
-          {event.tiers?.length > 1 && (
-            <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-teal)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-teal)]/30 shadow-xl">
-              {event.tiers.length} Tiers
+          {event.royaltyBps > 0 && (
+            <span className="px-3 py-1 rounded-full bg-black/50 text-white/70 text-[10px] font-black tracking-widest backdrop-blur-xl border border-white/10 shadow-xl">
+              {event.royaltyBps}% Royalty
             </span>
           )}
         </div>
@@ -103,9 +103,18 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
             </div>
             <div className="flex items-center gap-2">
               <MapPin size={12} className="text-[var(--accent-teal)]" />
-              <span className="truncate max-w-[120px] text-right">{event.location}</span>
+              <span className="truncate max-w-[120px] text-right">
+                {event.venueName ? `${event.venueName}, ${event.location}` : event.location}
+              </span>
             </div>
           </div>
+          
+          {event.minAge && event.minAge !== 'All ages' && (
+             <div className="absolute top-4 right-4 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[8px] font-black uppercase text-white tracking-widest flex items-center gap-1.5 z-10">
+               <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+               {event.minAge}
+             </div>
+          )}
 
         </div>
 

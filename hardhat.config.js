@@ -3,11 +3,11 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-export default {
+const config = {
   solidity: {
     version: "0.8.28",
     settings: {
-      evmVersion: "cancun", // <-- ADD THIS LINE
+      evmVersion: "cancun",
       optimizer: {
         enabled: true,
         runs: 200,
@@ -15,9 +15,15 @@ export default {
     },
   },
   networks: {
-    sepolia: {
-      url: process.env.RPC_URL,
-      accounts: [process.env.PRIVATE_KEY],
-    },
+    hardhat: {},
   },
 };
+
+if (process.env.RPC_URL && process.env.PRIVATE_KEY) {
+  config.networks.sepolia = {
+    url: process.env.RPC_URL,
+    accounts: [process.env.PRIVATE_KEY],
+  };
+}
+
+export default config;
