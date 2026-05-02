@@ -94,7 +94,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(config.contractAddress, CONTRACT_ABI, signer);
 
-      const totalValue = ethers.parseEther(totalPrice.toFixed(18));
       const numericEventId = parseInt(event.id.replace('evt_', ''), 10) || 1;
       
       const tierIndices: number[] = [];
@@ -107,6 +106,24 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
           tierQtys.push(q);
         }
       });
+
+      // Use exact BigInt wei prices from on-chain data to avoid floating-point
+      // precision errors (e.g. 0.001 * 3 = 0.0030000000000000004 in JS)
+      const rawTierPrices = (event as any)._tierPrices as Record<number, bigint> | undefined;
+      let totalValue: bigint;
+      if (rawTierPrices && Object.keys(rawTierPrices).length > 0) {
+        totalValue = tierIndices.reduce((sum, tidx, i) => {
+          const priceWei = rawTierPrices[tidx] ?? 0n;
+          return sum + priceWei * BigInt(tierQtys[i]);
+        }, 0n);
+      } else {
+        // Fallback: convert each tier price individually to avoid compound fp error
+        totalValue = tierIndices.reduce((sum, tidx, i) => {
+          const tier = event.tiers[tidx];
+          const priceWei = ethers.parseEther(tier.price.toFixed(18));
+          return sum + priceWei * BigInt(tierQtys[i]);
+        }, 0n);
+      }
 
       // Check for referral in URL
       const urlParams = new URLSearchParams(window.location.search);
