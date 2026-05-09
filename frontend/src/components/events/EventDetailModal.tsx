@@ -13,6 +13,9 @@ import { config } from '../../config';
 import { ethers } from 'ethers';
 import { useIPFSImage } from '../../hooks/useIPFSImage';
 
+// ETH to INR conversion rate (approximate, May 2026)
+const ETH_TO_INR = 210000;
+
 const CONTRACT_ABI = [
   "function buyTicket(uint256 eventId, uint256 tierId) public payable",
   "function buyTicketWithReferral(uint256 eventId, uint256 tierId, address referrer) public payable",
@@ -285,7 +288,8 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                                 </div>
                                 <div className="text-right">
                                   <p className="text-sm font-black text-[var(--accent-teal)]">{tier.price} ETH</p>
-                                  {q > 0 && <p className="text-[9px] font-black text-white/40 mt-1 uppercase tracking-widest">Sub: {(tier.price * q).toFixed(3)} ETH</p>}
+                                  <p className="text-[9px] font-bold text-white/30 mt-0.5">≈ ₹{Math.round(tier.price * ETH_TO_INR).toLocaleString('en-IN')}</p>
+                                  {q > 0 && <p className="text-[9px] font-black text-white/40 mt-1 uppercase tracking-widest">Sub: {(tier.price * q).toFixed(3)} ETH <span className="text-white/25">≈ ₹{Math.round(tier.price * q * ETH_TO_INR).toLocaleString('en-IN')}</span></p>}
                                 </div>
                               </div>
                               {!isSoldOut && !isOrganizer && (
@@ -312,7 +316,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
 
                                 <p className="text-[10px] text-white/40 font-bold mt-1 uppercase">Token #{t.tokenId.slice(-6)}</p>
                               </div>
-                              <p className="text-sm font-black text-white">{t.resalePrice} ETH</p>
+                              <div><p className="text-sm font-black text-white">{t.resalePrice} ETH</p><p className="text-[9px] font-bold text-white/25">≈ ₹{Math.round(t.resalePrice * ETH_TO_INR).toLocaleString('en-IN')}</p></div>
                             </button>
                           ))}
                         </div>
@@ -326,16 +330,21 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   <div className="pt-4 space-y-4">
                     {marketType === 'primary' && totalQuantity > 0 && (
                       <div className="flex items-center justify-between p-6 rounded-2xl bg-[var(--accent-teal)]/5 border border-[var(--accent-teal)]/20">
-                        <div><p className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)] mb-1">Total Cart Value</p><p className="text-2xl font-black text-white italic">{totalPrice.toFixed(3)} ETH</p></div>
+                        <div><p className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)] mb-1">Total Cart Value</p><p className="text-2xl font-black text-white italic">{totalPrice.toFixed(3)} ETH</p><p className="text-[10px] font-bold text-white/30 -mt-0.5">≈ ₹{Math.round(totalPrice * ETH_TO_INR).toLocaleString('en-IN')}</p></div>
                         <div className="text-right"><p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30 mb-1">Items</p><p className="text-lg font-black text-white/60">{totalQuantity} Tickets</p></div>
                       </div>
                     )}
-                    {!isOrganizer && (
-                      <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }} disabled={marketType === 'primary' ? totalQuantity === 0 : !selectedResaleTicket} onClick={marketType === 'primary' ? handlePurchase : handleBuyResale} className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center gap-3 transition-all ${(marketType === 'primary' ? totalQuantity > 0 : selectedResaleTicket) ? 'bg-white text-black shadow-xl hover:bg-[var(--accent-teal)] hover:text-white' : 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'}`}>
-                        {marketType === 'primary' ? <ShoppingBag size={16} /> : <Wallet size={16} />}
-                        {marketType === 'primary' ? (totalQuantity > 0 ? `Checkout ( ${totalPrice.toFixed(3)} ETH )` : 'Select Tickets') : 'Buy Resale Ticket'}
-                      </motion.button>
-                    )}
+                    {!isOrganizer && (() => {
+                      const isIpfsLoaded = event._ipfsHydrated !== false;
+                      const isButtonDisabled = !isIpfsLoaded || (marketType === 'primary' ? totalQuantity === 0 : !selectedResaleTicket);
+                      
+                      return (
+                        <motion.button whileHover={isButtonDisabled ? {} : { scale: 1.01 }} whileTap={isButtonDisabled ? {} : { scale: 0.99 }} disabled={isButtonDisabled} onClick={marketType === 'primary' ? handlePurchase : handleBuyResale} className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center gap-3 transition-all ${!isButtonDisabled ? 'bg-white text-black shadow-xl hover:bg-[var(--accent-teal)] hover:text-white' : 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5'}`}>
+                          {marketType === 'primary' ? <ShoppingBag size={16} /> : <Wallet size={16} />}
+                          {!isIpfsLoaded ? 'Loading Details...' : marketType === 'primary' ? (totalQuantity > 0 ? `Checkout ( ${totalPrice.toFixed(3)} ETH ≈ ₹${Math.round(totalPrice * ETH_TO_INR).toLocaleString('en-IN')} )` : 'Select Tickets') : 'Buy Resale Ticket'}
+                        </motion.button>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

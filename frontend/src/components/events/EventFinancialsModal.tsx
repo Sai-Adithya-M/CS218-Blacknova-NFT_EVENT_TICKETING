@@ -204,7 +204,9 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
 
   // Derive display values (use chain data when available, store as fallback)
   const totalRevenueWei: bigint = financials?.totalRevenueWei ?? 0n;
-  const deploymentCostWei: bigint = financials?.deploymentCostWei ?? 0n;
+  const deploymentCostWei: bigint = (financials?.deploymentCostWei && financials.deploymentCostWei > 0n)
+    ? financials.deploymentCostWei
+    : (event.deploymentCost ? BigInt(event.deploymentCost) : 0n);
   const netProfitWei: bigint = totalRevenueWei - deploymentCostWei;
   const deploymentCostEth = parseFloat(ethers.formatEther(deploymentCostWei));
   const netProfitEth = parseFloat(ethers.formatEther(netProfitWei));

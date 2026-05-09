@@ -3,7 +3,7 @@ import { useEventStore } from '../store/useEventStore';
 import {
   ArrowRight, Ticket, ShieldCheck, Zap, Globe, Coins, Lock,
   Twitter, Github, Instagram, ArrowUpRight, Sparkles, Wallet,
-  Calendar, MapPin, CheckCircle, Play
+  Calendar, MapPin, CheckCircle, Play, QrCode, Ban, Link2
 } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
@@ -56,6 +56,48 @@ const CAPABILITIES = [
   { icon: <Wallet size={20} />, title: 'MetaMask Integration', desc: 'One-click wallet connection. No accounts, no passwords — just your Web3 identity.' },
   { icon: <Zap size={20} />, title: 'Instant Verification', desc: 'QR scan at the gate verifies NFT ownership in real-time. No counterfeits, ever.' },
   { icon: <Globe size={20} />, title: 'Sepolia Testnet', desc: 'Deploy and test on Ethereum\'s Sepolia testnet before going live on mainnet.' },
+];
+
+const PLATFORM_FEATURES = [
+  {
+    icon: <Ban size={28} />,
+    color: 'from-red-500/20 to-orange-500/10',
+    accent: 'text-red-400',
+    borderAccent: 'hover:border-red-500/40',
+    title: 'Event Cancellation & Refunds',
+    subtitle: 'Full buyer protection, enforced on-chain.',
+    steps: [
+      { label: 'Organizer Cancels', detail: 'The organizer calls cancelEvent() and deposits the full refund liability pool (total ETH from all ticket sales) into the contract.' },
+      { label: 'Event Marked Cancelled', detail: 'The contract sets the event as cancelled on-chain. No new tickets can be purchased and resale listings become invalid.' },
+      { label: 'Attendees Claim Refunds', detail: 'Each ticket holder calls claimRefund(tokenId) — the contract sends back the lastPricePaid (original or resale price) directly to their wallet. One claim per ticket, protected by reentrancy guard.' },
+    ]
+  },
+  {
+    icon: <QrCode size={28} />,
+    color: 'from-green-500/20 to-emerald-500/10',
+    accent: 'text-green-400',
+    borderAccent: 'hover:border-green-500/40',
+    title: 'QR Code Gate Scanner',
+    subtitle: 'Cryptographic ticket verification at event entry.',
+    steps: [
+      { label: 'Attendee Generates QR', detail: 'The ticket holder signs a message with their wallet containing Token ID, Event ID, on-chain nonce, and a timestamp. This creates a 5-minute expiring QR code.' },
+      { label: 'Scanner Reads QR', detail: 'The organizer (or authorized scanner wallet) scans the QR. The app recovers the signer\'s address from the signature and verifies it matches the on-chain token owner.' },
+      { label: 'On-Chain Validation', detail: 'The contract\'s validateTicketEntry() checks: ticket exists, not already used, event not cancelled, and attendee is the current owner. Once validated, the ticket is permanently marked as used.' },
+    ]
+  },
+  {
+    icon: <Link2 size={28} />,
+    color: 'from-blue-500/20 to-indigo-500/10',
+    accent: 'text-blue-400',
+    borderAccent: 'hover:border-blue-500/40',
+    title: 'Referral Links',
+    subtitle: 'On-chain affiliate commissions for promoters.',
+    steps: [
+      { label: 'Organizer Adds Referrer', detail: 'From the Manage Events page, the organizer registers a referrer wallet address with a commission rate (in basis points, up to 50%). This is stored on-chain via addReferral().' },
+      { label: 'Share the Link', detail: 'A unique referral URL is generated: yoursite.com/events?event=evt_1&ref=0xABC... — anyone who buys through this link triggers the referral.' },
+      { label: 'Automatic Payout', detail: 'When a ticket is purchased with a valid referral, the smart contract splits the payment — the referrer\'s % is sent directly to their wallet, and the rest goes to the organizer. All in one atomic transaction.' },
+    ]
+  },
 ];
 
 export const Home: React.FC = () => {
@@ -482,6 +524,68 @@ export const Home: React.FC = () => {
               </motion.div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ─── PLATFORM FEATURES DEEP DIVE ─── */}
+      <section className="px-6 py-28 bg-gradient-to-b from-transparent via-white/[0.01] to-transparent border-t border-white/5">
+        <div className="px-12">
+          <motion.div
+            initial="hidden" whileInView="visible" variants={containerVariants} viewport={{ once: true }}
+          >
+            <div className="text-center mb-20">
+              <p className="text-[10px] font-black tracking-[0.4em] uppercase text-[var(--accent-purple)] mb-4 italic">Deep Dive</p>
+              <h2 className="text-5xl font-black uppercase tracking-tighter italic text-white">How Features Work</h2>
+              <p className="text-white/50 mt-4 max-w-lg mx-auto text-sm font-medium">From refunds to gate entry — everything runs on-chain with zero trust assumptions.</p>
+            </div>
+
+            <div className="space-y-8">
+              {PLATFORM_FEATURES.map((feature) => (
+                <motion.div
+                  key={feature.title}
+                  variants={itemVariants}
+                  className={`relative rounded-3xl border border-white/10 bg-white/[0.02] overflow-hidden ${feature.borderAccent} transition-all duration-500 group`}
+                >
+                  {/* Ambient glow */}
+                  <div className={`absolute inset-0 bg-gradient-to-br ${feature.color} opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none`} />
+                  
+                  <div className="relative z-10 p-8 lg:p-10">
+                    {/* Header */}
+                    <div className="flex flex-col lg:flex-row lg:items-center gap-6 mb-8">
+                      <div className={`w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center ${feature.accent} shrink-0 group-hover:scale-110 transition-transform`}>
+                        {feature.icon}
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-black uppercase tracking-tight italic mb-1">{feature.title}</h3>
+                        <p className="text-white/50 text-sm font-medium">{feature.subtitle}</p>
+                      </div>
+                    </div>
+
+                    {/* Steps */}
+                    <div className="grid md:grid-cols-3 gap-6">
+                      {feature.steps.map((step, si) => (
+                        <div key={si} className="relative">
+                          {/* Connector line between steps */}
+                          {si < feature.steps.length - 1 && (
+                            <div className="hidden md:block absolute top-6 right-0 w-6 h-px bg-white/10 translate-x-3" />
+                          )}
+                          <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/8 hover:bg-white/[0.06] transition-all h-full">
+                            <div className="flex items-center gap-3 mb-3">
+                              <span className={`text-[10px] font-black tracking-widest ${feature.accent} bg-white/5 px-2.5 py-1 rounded-lg border border-white/10`}>
+                                {String(si + 1).padStart(2, '0')}
+                              </span>
+                              <span className="text-xs font-black uppercase tracking-tight italic text-white">{step.label}</span>
+                            </div>
+                            <p className="text-[11px] text-white/45 font-medium leading-relaxed">{step.detail}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
         </div>
       </section>
 

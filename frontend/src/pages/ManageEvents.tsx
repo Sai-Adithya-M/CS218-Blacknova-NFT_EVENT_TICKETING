@@ -37,11 +37,14 @@ export const ManageEvents: React.FC = () => {
   const [selectedFinancials, setSelectedFinancials] = useState<Event | null>(null);
   const [selectedScanners, setSelectedScanners] = useState<Event | null>(null);
   const [cancellingEvent, setCancellingEvent] = useState<Event | null>(null);
+  const [preUploadedImageHash, setPreUploadedImageHash] = useState<string | null>(null);
+  const [, setIsUploadingImage] = useState(false);
   const [manageTab, setManageTab] = useState<'active' | 'history'>('active');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageUploadPromiseRef = useRef<Promise<string> | null>(null);
 
   // Referral state
   const [referralInputs, setReferralInputs] = useState<Record<string, { address: string, bps: string }>>({});
@@ -70,18 +73,53 @@ export const ManageEvents: React.FC = () => {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError("Image size must be less than 5MB to ensure fast IPFS uploads.");
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        setError("Only image files (JPG, PNG, WebP, SVG, GIF) are supported.");
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
       setImageFile(file);
+      setPreUploadedImageHash(null);
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
+
+      // ── Pre-upload image to IPFS immediately on selection ──
+      // By the time the user fills out the rest of the form and clicks Create,
+      // the image is already pinned. This saves ~3-5s at submit time.
+      setIsUploadingImage(true);
+      const uploadPromise = uploadToIPFS(file);
+      imageUploadPromiseRef.current = uploadPromise;
+      
+      uploadPromise
+        .then(hash => {
+          setPreUploadedImageHash(hash);
+          console.log('Image pre-uploaded to IPFS:', hash);
+        })
+        .catch(err => console.warn('Image pre-upload failed, will retry on submit:', err))
+        .finally(() => {
+          setIsUploadingImage(false);
+          // Only clear if this was the latest upload attempt
+          if (imageUploadPromiseRef.current === uploadPromise) {
+            imageUploadPromiseRef.current = null;
+          }
+        });
     }
   };
 
   const removeImage = () => {
     setImageFile(null);
     setImagePreview(null);
+    setPreUploadedImageHash(null);
+    setIsUploadingImage(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -139,103 +177,123 @@ export const ManageEvents: React.FC = () => {
       return;
     }
 
+    const royaltyVal = parseInt(formData.royalty || '0', 10);
+    if (isNaN(royaltyVal) || royaltyVal < 0 || royaltyVal > 20 || !Number.isInteger(royaltyVal)) {
+      setError("Royalty must be a whole number between 0 and 20%.");
+      return;
+    }
+
+    const markupVal = parseInt(formData.resaleMarkup || '10', 10);
+    if (isNaN(markupVal) || markupVal < 0 || markupVal > 100 || !Number.isInteger(markupVal)) {
+      setError("Max resale markup must be a whole number between 0 and 100%.");
+      return;
+    }
+
     setIsMining(true);
     try {
       if (!(window as any).ethereum) throw new Error("MetaMask not found");
 
-      const provider = new ethers.BrowserProvider((window as any).ethereum);
-      const network = await provider.getNetwork();
-      if (network.chainId !== BigInt(config.sepoliaChainId)) {
-        try {
-          await (window as any).ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0xaa36a7' }],
-          });
-        } catch (switchError) {
-          throw new Error("Please switch your MetaMask network to Sepolia to continue.");
-        }
-      }
+      // ── PHASE 1: Image hash + wallet setup in parallel ──
+      // If image was pre-uploaded on selection, use that hash instantly.
+      // If still uploading, await the existing promise. Otherwise upload now.
+      const imageUploadPromise = preUploadedImageHash
+        ? Promise.resolve(`ipfs://${preUploadedImageHash}`)
+        : imageUploadPromiseRef.current
+          ? imageUploadPromiseRef.current.then(hash => `ipfs://${hash}`)
+          : imageFile
+            ? uploadToIPFS(imageFile).then(hash => `ipfs://${hash}`).catch((err: any) => {
+                throw new Error("Failed to upload image to IPFS: " + err.message);
+              })
+            : Promise.resolve('');
 
-      const signer = await provider.getSigner();
-      const contract = new ethers.Contract(config.contractAddress, ABI, signer);
+      const walletSetupPromise = (async () => {
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const network = await provider.getNetwork();
+        if (network.chainId !== BigInt(config.sepoliaChainId)) {
+          try {
+            await (window as any).ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0xaa36a7' }],
+            });
+          } catch (switchError) {
+            throw new Error("Please switch your MetaMask network to Sepolia to continue.");
+          }
+        }
+        const signer = await provider.getSigner();
+        const contract = new ethers.Contract(config.contractAddress, ABI, signer);
+        return { signer, contract };
+      })();
+
+      // ── PHASE 2: Metadata JSON upload (runs right after image, parallel to wallet setup) ──
+      const jsonUploadPromise = imageUploadPromise.then(async (imageUrl) => {
+        const metadataJSON = {
+          name: formData.title || 'Event',
+          location: formData.location || '',
+          venueName: formData.venueName || '',
+          locationLink: formData.locationLink || '',
+          minAge: formData.minAge || 'All ages',
+          date: formData.date || new Date().toISOString(),
+          description: formData.description || '',
+          category: formData.category || 'Music',
+          image: imageUrl || undefined,
+          tiers: parsedTiers
+        };
+
+        try {
+          const ipfsHash = await uploadJSONToIPFS(metadataJSON);
+          preCacheIPFSMetadata(ipfsHash, metadataJSON);
+          return { ipfsHash, metadataJSON };
+        } catch (err: any) {
+          throw new Error("Failed to upload metadata to IPFS: " + err.message);
+        }
+      });
+
+      const [{ ipfsHash, metadataJSON }, { signer, contract }] = await Promise.all([
+        jsonUploadPromise,
+        walletSetupPromise,
+      ]);
 
       const royaltyBps = Math.min(100, Math.max(0, Math.floor(parseFloat(formData.royalty || '0'))));
 
-      let imageUrl = '';
-      if (imageFile) {
-        try {
-          const imageHash = await uploadToIPFS(imageFile);
-          imageUrl = `ipfs://${imageHash}`;
-        } catch (err: any) {
-          throw new Error("Failed to upload image to IPFS: " + err.message);
-        }
-      }
-
-      const metadataJSON = {
-        name: formData.title || 'Event',
-        location: formData.location || '',
-        venueName: formData.venueName || '',
-        locationLink: formData.locationLink || '',
-        minAge: formData.minAge || 'All ages',
-        date: formData.date || new Date().toISOString(),
-        description: formData.description || '',
-        category: formData.category || 'Music',
-        image: imageUrl || undefined,
-        tiers: parsedTiers
-      };
-
-      let ipfsHash = "";
-      try {
-        ipfsHash = await uploadJSONToIPFS(metadataJSON);
-        // Pre-cache: metadata is now instantly available on next page load
-        preCacheIPFSMetadata(ipfsHash, metadataJSON);
-      } catch (err: any) {
-        throw new Error("Failed to upload metadata to IPFS: " + err.message);
-      }
-
-      // Build tier arrays as requested by new contract design
+      // ── PHASE 3: Send tx and wait for confirmation ──
       const supplies = parsedTiers.map((t: any) => BigInt(t.supply));
       const prices = parsedTiers.map((t: any) => ethers.parseUnits(t.price.toString(), "ether"));
       const resaleMarkup = Math.min(100, Math.max(0, Math.floor(parseFloat(formData.resaleMarkup || '10'))));
 
       const tx = await contract.createEvent(ipfsHash, royaltyBps, prices, supplies, resaleMarkup);
-      const receipt = await tx.wait();
 
-      let blockchainEventId = `evt_${Date.now()}`;
+      // Wait for blockchain confirmation before navigating
+      const receipt = await tx.wait();
+      
+      let realId = `evt_${Date.now()}`; // Fallback
+      let gasUsedStr = "0";
+      let gasCostStr = "0";
+      
       if (receipt && receipt.logs) {
         try {
+          const iface = new ethers.Interface(ABI);
           const eventCreatedLog = receipt.logs.find((log: any) => {
-            try {
-              const parsed = contract.interface.parseLog(log);
-              return parsed && parsed.name === 'EventCreated';
-            } catch { return false; }
+            try { return iface.parseLog(log)?.name === 'EventCreated'; } catch { return false; }
           });
-
           if (eventCreatedLog) {
-            const parsedLog = contract.interface.parseLog(eventCreatedLog);
-            if (parsedLog && parsedLog.args && (parsedLog.args.eventId || parsedLog.args[0])) {
-              const id = (parsedLog.args.eventId || parsedLog.args[0]).toString();
-              blockchainEventId = `evt_${id}`;
+            const parsedLog = iface.parseLog(eventCreatedLog);
+            if (parsedLog?.args) {
+              realId = `evt_${(parsedLog.args.eventId || parsedLog.args[0]).toString()}`;
             }
           }
+          const gasUsed = receipt.gasUsed;
+          const gasPrice = receipt.effectiveGasPrice || 0n;
+          gasUsedStr = gasUsed.toString();
+          gasCostStr = (gasUsed * gasPrice).toString();
         } catch (err) {
-          console.warn("Failed to parse eventId from log", err);
+          console.warn('Failed to parse mined receipt:', err);
         }
       }
 
       const signerAddress = await signer.getAddress();
-      
-      let deploymentCost = "0";
-      let gasUsedStr = "0";
-      if (receipt) {
-        const gasUsed = receipt.gasUsed;
-        const gasPrice = receipt.effectiveGasPrice || tx.gasPrice || 0n;
-        deploymentCost = (gasUsed * gasPrice).toString();
-        gasUsedStr = gasUsed.toString();
-      }
 
       createEvent({
-        id: blockchainEventId,
+        id: realId,
         title: metadataJSON.name,
         description: metadataJSON.description,
         date: metadataJSON.date,
@@ -247,35 +305,34 @@ export const ManageEvents: React.FC = () => {
         minAge: metadataJSON.minAge,
         locationLink: metadataJSON.locationLink,
         status: 'active',
-        deploymentCost,
+        imageUrl: metadataJSON.image,
+        _ipfsHydrated: true,
+        _ipfsHash: ipfsHash,
+        deploymentCost: gasCostStr,
         gasUsed: gasUsedStr,
+        txHash: receipt.hash,
         tiers: metadataJSON.tiers.map((t: any, idx: number) => ({
-          id: t.id || `tier_${blockchainEventId}_${idx}`,
+          id: t.id || `tier_${realId}_${idx}`,
           name: t.name,
           price: t.price,
           supply: t.supply,
           sold: 0
         }))
       });
-      
+
+      // Reset form and navigate
       setFormData({
-        title: '',
-        description: '',
-        date: '',
-        location: '',
-        category: 'Music',
-        royalty: '5',
-        resaleMarkup: '10',
-        minAge: 'All ages',
-        venueName: '',
-        locationLink: '',
+        title: '', description: '', date: '', location: '',
+        category: 'Music', royalty: '5', resaleMarkup: '10',
+        minAge: 'All ages', venueName: '', locationLink: '',
       });
-      
-      navigate('/events');
       setTiers([{ name: 'General', price: '', supply: '100' }]);
       setImageFile(null);
       setImagePreview(null);
+      setPreUploadedImageHash(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      setIsMining(false);
+      navigate('/events');
     } catch (err: any) {
       console.error("Blockchain transaction failed:", err);
       if (err.code === 4001 || err.message?.toLowerCase().includes("user rejected")) {
@@ -446,7 +503,7 @@ export const ManageEvents: React.FC = () => {
 
                 <section className="space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--accent-purple)] italic">2. Event Details</h3>
-                  <div className="grid md:grid-cols-2 gap-4">
+                  <div className="grid md:grid-cols-3 gap-4">
                     <input
                       type="datetime-local"
                       required
@@ -455,23 +512,32 @@ export const ManageEvents: React.FC = () => {
                       value={formData.date}
                       onChange={e => setFormData({ ...formData, date: e.target.value })}
                     />
+                    <select
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white/70"
+                      value={formData.category}
+                      onChange={e => setFormData({ ...formData, category: e.target.value })}
+                    >
+                      <option value="Music">Music</option>
+                      <option value="Tech & Crypto">Tech & Crypto</option>
+                      <option value="Digital Art">Digital Art</option>
+                      <option value="Sports & Gaming">Sports & Gaming</option>
+                      <option value="Conference">Conference</option>
+                    </select>
+                    <select
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white/70"
+                      value={formData.minAge}
+                      onChange={e => setFormData({ ...formData, minAge: e.target.value })}
+                    >
+                      <option value="All ages">All ages</option>
+                      <option value="18+">18+</option>
+                      <option value="21+">21+</option>
+                    </select>
                   </div>
-                  <select
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 focus:outline-none focus:border-[var(--accent-purple)] transition-all font-medium text-white/70"
-                    value={formData.category}
-                    onChange={e => setFormData({ ...formData, category: e.target.value })}
-                  >
-                    <option value="Music">Music</option>
-                    <option value="Tech & Crypto">Tech & Crypto</option>
-                    <option value="Digital Art">Digital Art</option>
-                    <option value="Sports & Gaming">Sports & Gaming</option>
-                    <option value="Conference">Conference</option>
-                  </select>
 
                   <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="flex-1">
                       <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic mb-1">Secondary Market Royalty (%)</h4>
-                      <p className="text-[9px] text-white/30 font-medium">Whole numbers only (0-20%).</p>
+                      <p className="text-[9px] text-white/30 font-medium">Whole numbers only (0–20%). Organizer's cut on every resale.</p>
                     </div>
                     <div className="w-24 relative">
                       <input
@@ -483,9 +549,14 @@ export const ManageEvents: React.FC = () => {
                           }`}
                         value={formData.royalty}
                         onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d+$/.test(val)) {
-                            setFormData({ ...formData, royalty: val });
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            setFormData({ ...formData, royalty: '' });
+                            return;
+                          }
+                          const num = Math.floor(Number(raw));
+                          if (!isNaN(num) && num >= 0 && num <= 20) {
+                            setFormData({ ...formData, royalty: String(num) });
                           }
                         }}
                       />
@@ -496,7 +567,7 @@ export const ManageEvents: React.FC = () => {
                   <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="flex-1">
                       <h4 className="text-[10px] font-black uppercase tracking-widest text-orange-400 italic mb-1">Max Resale Markup (%)</h4>
-                      <p className="text-[9px] text-white/30 font-medium">How much above original price can resellers list (0-100%).</p>
+                      <p className="text-[9px] text-white/30 font-medium">Integers only (0–100%). Anti-scalp cap above face value.</p>
                     </div>
                     <div className="w-24 relative">
                       <input
@@ -508,9 +579,14 @@ export const ManageEvents: React.FC = () => {
                           }`}
                         value={formData.resaleMarkup}
                         onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d+$/.test(val)) {
-                            setFormData({ ...formData, resaleMarkup: val });
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            setFormData({ ...formData, resaleMarkup: '' });
+                            return;
+                          }
+                          const num = Math.floor(Number(raw));
+                          if (!isNaN(num) && num >= 0 && num <= 100) {
+                            setFormData({ ...formData, resaleMarkup: String(num) });
                           }
                         }}
                       />
@@ -654,10 +730,13 @@ export const ManageEvents: React.FC = () => {
                         </button>
                       </>
                     ) : (
-                      <>
+                      <div className="flex flex-col items-center gap-2 pointer-events-none">
                         <Upload className="text-white/20" size={24} />
-                        <span className="text-xs font-bold text-white/30 uppercase tracking-widest font-black">Banner Image</span>
-                      </>
+                        <div className="text-center">
+                          <span className="text-xs font-bold text-white/50 uppercase tracking-widest font-black block">Upload Banner Image</span>
+                          <span className="text-[9px] font-bold text-white/30 uppercase tracking-widest mt-1 block">Max 5MB • JPG, PNG, WebP, SVG</span>
+                        </div>
+                      </div>
                     )}
                     <input
                       type="file"
@@ -903,6 +982,7 @@ export const ManageEvents: React.FC = () => {
           eventName={selectedScanners.title}
         />
       )}
+
 
       {cancellingEvent && (
         <CancelEventModal

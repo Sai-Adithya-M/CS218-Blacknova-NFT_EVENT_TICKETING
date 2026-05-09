@@ -335,9 +335,12 @@ export const useEventStore = create<EventState>((set, get) => ({
 
       // Step 5: Build skeleton events with on-chain tier data
       // Apply cached IPFS metadata SYNCHRONOUSLY so repeat visitors see hydrated cards instantly
-      const skeletonEvents: Event[] = onChainData.map((data, idx) => {
+      const fullyHydratedEvents: Event[] = [];
+      const unhydratedEvents: Event[] = [];
+
+      onChainData.forEach((data, idx) => {
         const evt = data[0];
-        if (!evt) return null;
+        if (!evt) return;
         const i = idx + 1;
         const eventId = `evt_${i}`;
         const organiser = data[0].organiser ?? data[0][0];
@@ -372,45 +375,55 @@ export const useEventStore = create<EventState>((set, get) => ({
           _ipfsHash: ipfsHash,
         } as Event;
 
-        // Instant hydration from cache (sync — no network call)
         if (ipfsHash) {
           const cached = cacheGet(ipfsHash);
           if (cached) {
             skeleton = applyMetadata(skeleton, cached);
-            skeleton._ipfsHydrated = true; // Mark so Phase 2 skips it
+            skeleton._ipfsHydrated = true;
+            fullyHydratedEvents.push(skeleton);
+          } else {
+            unhydratedEvents.push(skeleton);
           }
+        } else {
+          fullyHydratedEvents.push(skeleton);
         }
+      });
 
-        return skeleton;
-      }).filter((e): e is Event => e !== null);
-
-      // ── Phase 1: Show events IMMEDIATELY from chain data ──────────────────
-      // Users see cards with price, supply, tier info right away.
-      // Titles show "Event #N" until IPFS hydrates them.
-      set({ events: skeletonEvents, isLoading: false });
-      console.log(`EventStore: ${skeletonEvents.length} events shown from chain (IPFS hydrating in background)`);
+      // ── Phase 1: Show fully hydrated events immediately ──────────────────
+      // Users will NOT see black skeleton cards anymore. Only fully loaded events.
+      set(state => {
+        // Keep any optimistic events that haven't been mined yet
+        const optimisticEvents = state.events.filter(e => parseInt(e.id.replace('evt_', '')) > 999999);
+        const combined = [...optimisticEvents, ...fullyHydratedEvents].sort((a, b) => {
+          return parseInt(b.id.replace('evt_', '')) - parseInt(a.id.replace('evt_', ''));
+        });
+        return { events: combined, isLoading: false };
+      });
+      console.log(`EventStore: ${fullyHydratedEvents.length} events fully loaded immediately. ${unhydratedEvents.length} loading in background.`);
 
       // ── Phase 2: Hydrate IPFS metadata progressively (non-blocking) ────
-      // Each event hydrates independently — fast-cached ones appear first,
-      // slow network ones fill in as they arrive. No waiting for all.
-      skeletonEvents.forEach((e, idx) => {
-        if (!e._ipfsHash || (e as any)._ipfsHydrated) return; // Skip cached ones
-
-        fetchMetaCached(e._ipfsHash)
+      // Unhydrated events are fetched in the background and injected into the UI only when ready.
+      unhydratedEvents.forEach((e) => {
+        fetchMetaCached(e._ipfsHash!)
           .then(metadata => {
             if (metadata) {
-              set(state => ({
-                events: state.events.map(ev =>
-                  ev.id === e.id ? applyMetadata(ev, metadata) : ev
-                )
-              }));
+              const hydrated = applyMetadata(e, metadata);
+              hydrated._ipfsHydrated = true;
+              set(state => {
+                const combined = [...state.events.filter(ev => ev.id !== e.id), hydrated].sort((a, b) => {
+                  return parseInt(b.id.replace('evt_', '')) - parseInt(a.id.replace('evt_', ''));
+                });
+                return { events: combined };
+              });
             } else {
-              // Mark as error, schedule retry
-              set(state => ({
-                events: state.events.map(ev =>
-                  ev.id === e.id ? { ...ev, hasIpfsError: true } : ev
-                )
-              }));
+              // Mark as error and insert
+              const errEvent = { ...e, hasIpfsError: true };
+              set(state => {
+                const combined = [...state.events.filter(ev => ev.id !== e.id), errEvent].sort((a, b) => {
+                  return parseInt(b.id.replace('evt_', '')) - parseInt(a.id.replace('evt_', ''));
+                });
+                return { events: combined };
+              });
               try { localStorage.removeItem(CACHE_PREFIX + e._ipfsHash); } catch {}
               setTimeout(() => get().retryMetadata(e.id, e._ipfsHash!, 0), 3000);
             }

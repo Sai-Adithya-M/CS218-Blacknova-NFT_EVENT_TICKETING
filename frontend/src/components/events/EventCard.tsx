@@ -12,10 +12,14 @@ interface EventCardProps {
 }
 
 
+// ETH to INR conversion rate (approximate, May 2026)
+const ETH_TO_INR = 210000;
+
 export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEtherscan = false }) => {
 
   const date = new Date(event.date);
   const lowestPrice = event.tiers?.length ? Math.min(...event.tiers.map(t => t.price)) : 0;
+  const lowestPriceINR = Math.round(lowestPrice * ETH_TO_INR);
   const totalSold = event.tiers?.reduce((sum, t) => sum + t.sold, 0) ?? 0;
   const totalSupply = event.tiers?.reduce((sum, t) => sum + t.supply, 0) ?? 0;
   const availability = (totalSold / totalSupply) * 100;
@@ -206,6 +210,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
             <div className="flex flex-col">
               <span className="text-[8px] text-[var(--accent-teal)] font-black uppercase tracking-widest opacity-60">Price From</span>
               <span className="text-xl font-black text-white tracking-tighter">{lowestPrice} ETH</span>
+              <span className="text-[10px] font-bold text-white/40 -mt-0.5">≈ ₹{lowestPriceINR.toLocaleString('en-IN')}</span>
             </div>
             
             {showEtherscan ? (
