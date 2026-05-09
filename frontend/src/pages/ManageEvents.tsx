@@ -282,7 +282,7 @@ export const ManageEvents: React.FC = () => {
             }
           }
           const gasUsed = receipt.gasUsed;
-          const gasPrice = receipt.effectiveGasPrice || 0n;
+          const gasPrice = receipt.gasPrice || receipt.effectiveGasPrice || tx.gasPrice || 0n;
           gasUsedStr = gasUsed.toString();
           gasCostStr = (gasUsed * gasPrice).toString();
         } catch (err) {
@@ -536,38 +536,8 @@ export const ManageEvents: React.FC = () => {
 
                   <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="flex-1">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic mb-1">Secondary Market Royalty (%)</h4>
-                      <p className="text-[9px] text-white/30 font-medium">Whole numbers only (0–20%). Organizer's cut on every resale.</p>
-                    </div>
-                    <div className="w-24 relative">
-                      <input
-                        type="number"
-                        min="0"
-                        max="20"
-                        step="1"
-                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${(parseInt(formData.royalty) > 20 || parseInt(formData.royalty) < 0) ? 'border-red-500/50' : 'border-white/10 focus:border-[var(--accent-teal)]'
-                          }`}
-                        value={formData.royalty}
-                        onChange={e => {
-                          const raw = e.target.value;
-                          if (raw === '') {
-                            setFormData({ ...formData, royalty: '' });
-                            return;
-                          }
-                          const num = Math.floor(Number(raw));
-                          if (!isNaN(num) && num >= 0 && num <= 20) {
-                            setFormData({ ...formData, royalty: String(num) });
-                          }
-                        }}
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/20">%</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
-                    <div className="flex-1">
                       <h4 className="text-[10px] font-black uppercase tracking-widest text-orange-400 italic mb-1">Max Resale Markup (%)</h4>
-                      <p className="text-[9px] text-white/30 font-medium">Integers only (0–100%). Anti-scalp cap above face value.</p>
+                      <p className="text-[9px] text-white/30 font-medium">Integers only (0–100%). Sets the cap for secondary market pricing.</p>
                     </div>
                     <div className="w-24 relative">
                       <input
@@ -575,8 +545,7 @@ export const ManageEvents: React.FC = () => {
                         min="0"
                         max="100"
                         step="1"
-                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${(parseInt(formData.resaleMarkup) > 100 || parseInt(formData.resaleMarkup) < 0) ? 'border-red-500/50' : 'border-white/10 focus:border-orange-400'
-                          }`}
+                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center border-white/10 focus:border-orange-400`}
                         value={formData.resaleMarkup}
                         onChange={e => {
                           const raw = e.target.value;
@@ -586,7 +555,46 @@ export const ManageEvents: React.FC = () => {
                           }
                           const num = Math.floor(Number(raw));
                           if (!isNaN(num) && num >= 0 && num <= 100) {
-                            setFormData({ ...formData, resaleMarkup: String(num) });
+                            const maxRoyalty = Math.floor((num / (100 + num)) * 100);
+                            const currentRoyalty = parseInt(formData.royalty || '0');
+                            
+                            setFormData({ 
+                              ...formData, 
+                              resaleMarkup: String(num),
+                              royalty: currentRoyalty > maxRoyalty ? String(Math.min(maxRoyalty, 20)) : formData.royalty
+                            });
+                          }
+                        }}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/20">%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="flex-1">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--accent-teal)] italic mb-1">Secondary Market Royalty (%)</h4>
+                      <p className="text-[9px] text-white/30 font-medium">Max bounded by Resale Markup to protect sellers from mathematically losing money.</p>
+                    </div>
+                    <div className="w-24 relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max={formData.resaleMarkup ? Math.min(20, Math.floor((parseInt(formData.resaleMarkup) / (100 + parseInt(formData.resaleMarkup))) * 100)) : 0}
+                        step="1"
+                        className={`w-full bg-white/5 border rounded-lg py-2 px-3 focus:outline-none transition-all font-bold text-white text-center ${(parseInt(formData.royalty) > (formData.resaleMarkup ? Math.floor((parseInt(formData.resaleMarkup) / (100 + parseInt(formData.resaleMarkup))) * 100) : 0)) ? 'border-red-500/50' : 'border-white/10 focus:border-[var(--accent-teal)]'}`}
+                        value={formData.royalty}
+                        onChange={e => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            setFormData({ ...formData, royalty: '' });
+                            return;
+                          }
+                          const num = Math.floor(Number(raw));
+                          const markupNum = parseInt(formData.resaleMarkup || '0');
+                          const maxRoyalty = Math.min(20, Math.floor((markupNum / (100 + markupNum)) * 100));
+                          
+                          if (!isNaN(num) && num >= 0 && num <= maxRoyalty) {
+                            setFormData({ ...formData, royalty: String(num) });
                           }
                         }}
                       />
