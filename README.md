@@ -185,7 +185,7 @@ To deploy a new instance of the **NFTTicket** contract:
 
 1.  **Clone & Install Root Dependencies**:
     ```bash
-    git clone [your-repo-url]
+    git clone https://github.com/Sai-Adithya-M/CS218-Blacknova-NFT_EVENT_TICKETING.git
     cd CS218-Blacknova-NFT_EVENT_TICKETING
     npm install
     ```
