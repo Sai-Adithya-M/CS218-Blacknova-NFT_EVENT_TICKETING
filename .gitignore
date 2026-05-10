@@ -20,3 +20,5 @@
 
 # Hardhat coverage reports
 /coverage
+
+gas-report.html
