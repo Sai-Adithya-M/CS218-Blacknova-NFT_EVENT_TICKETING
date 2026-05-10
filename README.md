@@ -37,31 +37,43 @@ graph TD
 ##  Feature Deep-Dive
 
 ### 1. Organizer Management Suite
-*   **Decentralized Event Deployment**: Organizers deploy immutable event contracts directly from their dashboard.
+*   **Decentralized Event Deployment**: Organizers deploy immutable event contracts directly from their dashboard with up to 5 tiers.
 *   **IPFS-Backed Metadata**: All event banners and descriptions are stored on IPFS, ensuring the data remains permanent and tamper-proof.
-*   **Financial Analytics**: A premium dashboard tracking total revenue, tickets sold across tiers, and real-time network latency (ping).
-*   **Tiered Ticketing Engine**: Supports **Silver, Gold, and VIP** tiers, each with its own supply and price points defined at creation.
+*   **Event Lifecycle Control**: Edit tier prices/supplies or **Cancel** an event to trigger automated user refunds.
+*   **Decentralized Validation**: Add authorized "Scanners" to verify tickets at the venue gate.
+*   **Referral System**: Configure referral rewards (bps) for promoters to drive ticket sales.
 
 ### 2. Ticketing & Minting Engine
 *   **Primary Sales**: Direct-to-fan minting avoids middleman markups.
-*   **Batch Purchase Logic**: Optimized smart contract functions allow users to buy multiple tickets across different tiers in a single transaction, saving on cumulative gas fees.
-*   **Dynamic Metadata**: Each ticket's tier and event ID are encoded on-chain, verifiable by any block explorer.
+*   **Batch Purchase Logic**: Optimized smart contract functions allow users to buy multiple tickets across different tiers in a single transaction, saving on gas.
+*   **Dynamic Metadata**: Each ticket's tier, event ID, and unique nonce are encoded on-chain.
+*   **Secure QR Validation**: On-chain verifiable entry system to prevent ticket duplication.
 
 ### 3. Secondary Marketplace (P2P)
-*   **Secure Resale**: Owners can list their tickets for resale by specifying a price in ETH.
-*   **Escrow-less Trading**: The contract handles the transfer of ownership and funds atomically, preventing "double-spend" or payment fraud.
-*   **EIP-2981 Standard**: Automated royalty distribution. On every resale, a percentage (defined by the organizer) is instantly routed to the organizer's wallet.
+*   **Secure Resale with Price Caps**: Owners can list tickets for resale, with prices capped by the organizer (e.g., max 10% markup) to prevent scalping.
+*   **Escrow-less Trading**: Atomic transfer of ownership and funds, preventing fraud.
+*   **EIP-2981 Standard**: Automated royalty distribution ensures organizers receive a percentage of every resale.
+
+---
+
+##  Screenshots
+
+### 🛒 Marketplace
+![Marketplace](./marketplace.png)
+
+### 🎟️ My Tickets
+![My Tickets](./mytickets.png)
 
 ---
 
 ##  Tech Stack Highlights
 
-- **Frontend**: **React 18** with **Vite** for ultra-fast HMR and build times.
+- **Frontend**: **React 18** with **Vite** for ultra-fast performance.
 - **Styling**: **Tailwind CSS** with a custom "Glassmorphism" design system.
-- **Animations**: **Framer Motion** for smooth page transitions and micro-interactions.
-- **State Management**: **Zustand** for lightweight, high-performance global state (Handling wallet and event data).
-- **Blockchain Interaction**: **Ethers.js v6** for secure communication with the Ethereum network.
-- **Smart Contracts**: **Solidity 0.8.20**, utilizing **OpenZeppelin** libraries for ERC-721 and Access Control.
+- **Animations**: **Framer Motion** for smooth page transitions.
+- **State Management**: **Zustand** for lightweight global state management.
+- **Blockchain Interaction**: **Ethers.js v6** for secure communication.
+- **Smart Contracts**: **Solidity 0.8.20**, utilizing **OpenZeppelin** libraries.
 
 ---
 
@@ -70,8 +82,8 @@ graph TD
 ### Requirements
 - **Node.js**: `v18.x` or higher
 - **Package Manager**: `npm v9.x` or `yarn`
-- **Wallet**: **MetaMask** installed in your browser.
-- **Network**: **Ethereum Sepolia Testnet** (Add via [Chainlist](https://chainlist.org/chain/11155111)).
+- **Wallet**: **MetaMask** installed.
+- **Network**: **Ethereum Sepolia Testnet**.
 - **Funds**: Sepolia ETH (Available at [Alchemy Faucet](https://sepoliafaucet.com/)).
 
 ### Installation Steps
@@ -92,6 +104,7 @@ graph TD
     ```bash
     cd frontend
     npm install
+    npm run dev
     ```
 
 4.  **Environment Setup**
@@ -109,23 +122,26 @@ graph TD
 | Function | Description |
 | :--- | :--- |
 | `createEvent(...)` | Initializes event metadata, tiers, and royalty rates. |
+| `editEvent(...)` | Updates pricing and supply for existing tiers. |
+| `cancelEvent(...)` | Cancels event and locks funds for ticket holder refunds. |
 | `buyTicket(...)` | Mints a specific tier ticket for a user. |
 | `buyBatchTickets(...)` | Optimized multi-tier, multi-quantity purchase. |
-| `listForResale(...)` | Creates an active listing in the secondary marketplace. |
-| `buyResaleTicket(...)` | Atomic transfer of NFT to buyer and ETH to seller + organizer. |
-| `royaltyInfo(...)` | Returns royalty recipient and amount based on sale price (EIP-2981). |
+| `listForResale(...)` | Creates an active listing with price cap validation. |
+| `buyResaleTicket(...)` | Atomic transfer of NFT with royalty distribution. |
+| `claimRefund(...)` | Allows users to claim funds if an event is cancelled. |
+| `validateTicketEntry(...)` | Marks a ticket as used on-chain (Venue Entry). |
+| `addScanner(...)` | Authorizes a wallet to validate tickets. |
+| `addReferral(...)` | Configures referral rewards for specific addresses. |
 
 ---
 
-##   Future Enhancements
+##  Future Enhancements
 
 -  **Ticket verification via QR code**: A secure scanner for event entry to verify NFT ownership instantly.
 -  **WalletConnect & Coinbase Wallet support**: Expanding accessibility beyond MetaMask.
 -  **Native mobile app**: A dedicated experience for managing and browsing tickets on the go.
--  **Fiat onramps for ticket purchase**: Allow users to buy NFT tickets using credit cards and local currency.
--  **Real-time analytics dashboard**: Advanced tracking for organizers to monitor sales and audience demographics.
--  **Email & calendar integration**: Automatically sync event details to user calendars and send receipt emails.
--  **On-chain ticket history viewer**: A transparent ledger to track the provenance and previous owners of every ticket.
+-  **Fiat onramps for ticket purchase**: Allow users to buy NFT tickets using credit cards.
+-  **Real-time analytics dashboard**: Advanced tracking for organizers to monitor sales.
 
 ---
 
@@ -133,7 +149,7 @@ graph TD
 
 - **Transaction Reverted**: Ensure you have enough Sepolia ETH for gas. Check if the event ticket supply has reached its limit.
 - **Wallet Not Connecting**: Ensure your MetaMask is set to the **Sepolia Test Network**.
-- **Images Not Loading**: IPFS gateways can sometimes be slow; ensure your Pinata keys are correctly configured in the `.env`.
+- **Images Not Loading**: IPFS gateways can sometimes be slow; ensure your Pinata keys are correctly configured.
 
 ---
 
@@ -142,4 +158,4 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
 
-Developed  by **Team Blacknova** for the Future of Ticketing.
+Developed by **Team Blacknova** for the Future of Ticketing.
