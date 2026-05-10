@@ -67,7 +67,7 @@ graph TD
 ### 🛒 Marketplace
 ![Marketplace](./marketplace.png)
 
-### 🎟️ My Tickets
+### My Tickets
 ![My Tickets](./mytickets.png)
 
 ---
@@ -92,7 +92,7 @@ graph TD
 - **Network**: **Ethereum Sepolia Testnet**.
 - **Funds**: Sepolia ETH (Available at [Alchemy Faucet](https://sepoliafaucet.com/)).
 
-### 🚀 Smart Contract Deployment
+### Smart Contract Deployment
 
 To deploy a new instance of the **NFTTicket** contract:
 
@@ -114,7 +114,7 @@ To deploy a new instance of the **NFTTicket** contract:
 
 ---
 
-### 💻 Frontend & Installation Steps
+###  Frontend & Installation Steps
 
 1.  **Clone & Install Root Dependencies**:
     ```bash
@@ -137,7 +137,7 @@ To deploy a new instance of the **NFTTicket** contract:
 4.  **Environment Configuration**:
     Create a `.env` in `frontend/` and add:
     ```env
-    VITE_CONTRACT_ADDRESS=0x74eFFE12e70e99e4CC9D2703433eFcF87A35BdE3
+    VITE_CONTRACT_ADDRESS=your_contract_address
     VITE_PINATA_JWT=your_pinata_jwt_here
     ```
 
@@ -164,7 +164,7 @@ The NETIX smart contract implements the following core functions with full NatSp
     - `@notice`: Cancels an event and locks funds for ticket holder refunds.
     - `@param eventId`: Unique ID of the event to cancel.
 
-### 🎟️ Ticketing & Referral
+###  Ticketing & Referral
 - **`buyTicket(uint256 eventId, uint256 tierId)`**
     - `@notice`: Purchases and mints a single ticket for a specific tier.
 - **`buyBatchTickets(uint256 eventId, uint256[] tierIds, uint24[] quantities)`**
@@ -173,7 +173,7 @@ The NETIX smart contract implements the following core functions with full NatSp
     - `@notice`: Configures a referral reward for a specific promoter wallet.
     - `@param bps`: The commission rate in basis points (e.g. 500 = 5%).
 
-### 🛍️ Secondary Marketplace
+###  Secondary Marketplace
 - **`listForResale(uint256 tokenId, uint256 priceWei)`**
     - `@notice`: Lists an owned ticket for resale with price cap validation.
     - `@param priceWei`: Resale price (cannot exceed original price + markup cap).
@@ -182,7 +182,7 @@ The NETIX smart contract implements the following core functions with full NatSp
 - **`claimRefund(uint256 tokenId)`**
     - `@notice`: Allows users to claim a full refund if an event is cancelled.
 
-### 🛡️ Access Control & Validation
+###  Access Control & Validation
 - **`addScanner(uint256 eventId, address scanner)`**
     - `@notice`: Authorizes a wallet address to act as a ticket scanner.
 - **`validateTicketEntry(uint256 tokenId, address expectedAttendee)`**
@@ -211,11 +211,6 @@ The NETIX smart contract implements the following core functions with full NatSp
 - **Scanner Access Denied**: Ensure your wallet address has been added to the authorized scanners list for that specific event.
 - **Wallet Not Connecting**: Ensure your MetaMask is set to the **Sepolia Test Network**.
 - **Images Not Loading**: IPFS gateways can sometimes be slow; ensure your Pinata keys are correctly configured and the hash is valid.
-
----
-
-## License
-Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
 
