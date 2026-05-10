@@ -11,8 +11,8 @@ describe("Referral Payment Test", function () {
     const F = await ethers.getContractFactory("NFTTicket");
     contract = await F.deploy();
 
-    // Create event with 1 tier, 10% royalty, 10% max resale markup
-    await contract.connect(organiser).createEvent("QmRef", 10, [PRICE], [100], 10);
+    // Create event with 1 tier, 10% royalty, 20% max resale markup
+    await contract.connect(organiser).createEvent("QmRef", 10, [PRICE], [100], 20);
     
     // Register referrer with 5% (500 bps)
     await contract.connect(organiser).addReferral(1, referrer.address, 500);

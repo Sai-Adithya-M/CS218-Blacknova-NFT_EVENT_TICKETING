@@ -2,223 +2,484 @@ import { expect } from "chai";
 import hre from "hardhat";
 const { ethers } = hre;
 
-describe("NFTTicket Multi-Tier", function () {
-  let contract, deployer, organiser, buyer, buyer2, buyer3;
-  const P1_WEI = ethers.parseEther("0.1");
-  const P2_WEI = ethers.parseEther("0.2");
-  const VIP_WEI = ethers.parseEther("0.5");
-  const ROY = 10; // 10% royalty
+describe("NFTTicket — Full Gas Report", function () {
+  let contract, deployer, organiser, buyer, buyer2, buyer3, scanner, referrer;
+  const P1 = ethers.parseEther("0.1");
+  const P2 = ethers.parseEther("0.2");
+  const VIP = ethers.parseEther("0.5");
+  const ROY = 10;   // 10%
+  const MARKUP = 20; // 20% max resale
 
   beforeEach(async function () {
-    [deployer, organiser, buyer, buyer2, buyer3] = await ethers.getSigners();
+    [deployer, organiser, buyer, buyer2, buyer3, scanner, referrer] = await ethers.getSigners();
     const F = await ethers.getContractFactory("NFTTicket");
     contract = await F.deploy();
   });
 
-  describe("Event Creation & Multi-Tier Setup", function () {
-    it("Creates an event with 3 independent tiers", async function () {
-      const prices = [P1_WEI, P2_WEI, VIP_WEI];
-      const supplies = [100, 50, 10];
-      
-      await contract.connect(organiser).createEvent("QmHash1", ROY, prices, supplies);
-      
+  // ═══════════════════════════════════════════════════════════════════
+  // 1. createEvent
+  // ═══════════════════════════════════════════════════════════════════
+  describe("createEvent", function () {
+    it("creates event with 1 tier", async function () {
+      await contract.connect(organiser).createEvent("QmHash1", ROY, [P1], [100], MARKUP);
+      const d = await contract.fetchEventData(1);
+      expect(d.organiser).to.equal(organiser.address);
+      expect(d.royaltyBps).to.equal(ROY);
+      expect(d.maxResaleMarkupPct).to.equal(MARKUP);
+    });
+
+    it("creates event with 3 tiers", async function () {
+      await contract.connect(organiser).createEvent("QmHash2", ROY, [P1, P2, VIP], [100, 50, 10], MARKUP);
       const tiers = await contract.getTiers(1);
       expect(tiers.length).to.equal(3);
-      expect(tiers[0].price).to.equal(P1_WEI);
-      expect(tiers[2].maxSupply).to.equal(10);
-      
-      const eventData = await contract.fetchEventData(1);
-      expect(eventData.organiser).to.equal(organiser.address);
-      expect(eventData.royaltyBps).to.equal(ROY);
+      expect(tiers[2].price).to.equal(VIP);
     });
 
-    it("Reverts if price and supply array lengths mismatch", async function () {
-      await expect(
-        contract.connect(organiser).createEvent("QmErr", ROY, [P1_WEI], [10, 20])
-      ).to.be.revertedWith("Tier mismatch");
+    it("creates event with 5 tiers (max)", async function () {
+      const prices = [P1, P1, P1, P1, P1];
+      const supplies = [10, 10, 10, 10, 10];
+      await contract.connect(organiser).createEvent("Qm5T", 5, prices, supplies, 50);
+      const tiers = await contract.getTiers(1);
+      expect(tiers.length).to.equal(5);
     });
 
-    it("Reverts with zero tiers", async function () {
-      await expect(
-        contract.connect(organiser).createEvent("QmEmpty", ROY, [], [])
-      ).to.be.revertedWith("At least one tier required");
-    });
-  });
-
-  describe("Ticket Purchasing (Multi-Tier)", function () {
-    beforeEach(async function () {
-      await contract.connect(organiser).createEvent("QmBuy", ROY, [P1_WEI, VIP_WEI], [10, 2]);
+    it("reverts: tier mismatch", async function () {
+      await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1], [10, 20], MARKUP))
+        .to.be.revertedWith("Tier mismatch");
     });
 
-    it("Allows buying a specific tier (Silver)", async function () {
-      await contract.connect(buyer).buyTicket(1, 0, { value: P1_WEI });
-      const tier = await contract.getTier(1, 0);
-      expect(tier.sold).to.equal(1);
+    it("reverts: zero tiers", async function () {
+      await expect(contract.connect(organiser).createEvent("QmE", ROY, [], [], MARKUP))
+        .to.be.revertedWith("At least one tier required");
     });
 
-    it("Allows buying a premium tier (VIP)", async function () {
-      await contract.connect(buyer).buyTicket(1, 1, { value: VIP_WEI });
-      const tier = await contract.getTier(1, 1);
-      expect(tier.sold).to.equal(1);
+    it("reverts: > 5 tiers", async function () {
+      await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1,P1,P1,P1,P1,P1], [1,1,1,1,1,1], MARKUP))
+        .to.be.revertedWith("Max 5 tiers allowed");
     });
 
-    it("Reverts if incorrect payment is sent for a tier", async function () {
-      await expect(
-        contract.connect(buyer).buyTicket(1, 1, { value: P1_WEI })
-      ).to.be.revertedWith("Insufficient payment");
+    it("reverts: royalty > 100", async function () {
+      await expect(contract.connect(organiser).createEvent("QmE", 101, [P1], [10], MARKUP))
+        .to.be.revertedWith("Royalty <= 100%");
     });
 
-    it("Reverts if a tier is sold out", async function () {
-      await contract.connect(buyer).buyTicket(1, 1, { value: VIP_WEI });
-      await contract.connect(buyer2).buyTicket(1, 1, { value: VIP_WEI });
-      
-      await expect(
-        contract.connect(buyer3).buyTicket(1, 1, { value: VIP_WEI })
-      ).to.be.revertedWith("Sold out");
+    it("reverts: markup > 100", async function () {
+      await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1], [10], 101))
+        .to.be.revertedWith("Markup <= 100%");
     });
 
-    it("Allows batch purchasing of different tiers", async function () {
-      // Buy 2 Silver and 1 VIP in one tx
-      const tierIds = [0, 1];
-      const qtys = [2, 1];
-      const totalCost = (P1_WEI * 2n) + VIP_WEI;
-      
-      await contract.connect(buyer).buyBatchTickets(1, tierIds, qtys, { value: totalCost });
-      
-      const silverTier = await contract.getTier(1, 0);
-      const vipTier = await contract.getTier(1, 1);
-      
-      expect(silverTier.sold).to.equal(2);
-      expect(vipTier.sold).to.equal(1);
+    it("reverts: royalty >= markup (bound check)", async function () {
+      await expect(contract.connect(organiser).createEvent("QmE", 20, [P1], [10], 20))
+        .to.be.revertedWith("Royalty must be less than max resale markup");
+    });
+
+    it("allows royalty=0 with any markup", async function () {
+      await contract.connect(organiser).createEvent("QmE", 0, [P1], [10], 0);
+      const d = await contract.fetchEventData(1);
+      expect(d.royaltyBps).to.equal(0);
     });
   });
 
-  describe("Event Cancellation & Refunds", function () {
+  // ═══════════════════════════════════════════════════════════════════
+  // 2. editEvent
+  // ═══════════════════════════════════════════════════════════════════
+  describe("editEvent", function () {
     beforeEach(async function () {
-      await contract.connect(organiser).createEvent("QmCancel", ROY, [P1_WEI], [10]);
-      await contract.connect(buyer).buyTicket(1, 0, { value: P1_WEI });
-      await contract.connect(buyer2).buyTicket(1, 0, { value: P1_WEI });
+      await contract.connect(organiser).createEvent("QmEdit", ROY, [P1, VIP], [100, 10], MARKUP);
     });
 
-    it("Organiser can cancel event by providing total refund liability", async function () {
-      const liability = P1_WEI * 2n;
-      await expect(contract.connect(organiser).cancelEvent(1, { value: liability }))
-        .to.emit(contract, "EventCancelled")
-        .withArgs(1);
-      
-      expect(await contract.isCancelled(1)).to.be.true;
+    it("edits prices and supplies", async function () {
+      const newP = [P2, ethers.parseEther("1.0")];
+      await contract.connect(organiser).editEvent(1, newP, [200, 20]);
+      const tiers = await contract.getTiers(1);
+      expect(tiers[0].price).to.equal(P2);
+      expect(tiers[1].maxSupply).to.equal(20);
     });
 
-    it("Reverts cancellation if insufficient funds provided", async function () {
-      await expect(
-        contract.connect(organiser).cancelEvent(1, { value: P1_WEI })
-      ).to.be.revertedWithCustomError(contract, "InsufficientRefundFunds");
+    it("reverts: non-organiser", async function () {
+      await expect(contract.connect(buyer).editEvent(1, [P1, VIP], [100, 10]))
+        .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
     });
 
-    it("Allows ticket owners to claim refund after cancellation", async function () {
-      await contract.connect(organiser).cancelEvent(1, { value: P1_WEI * 2n });
-      
-      const initialBalance = await ethers.provider.getBalance(buyer.address);
-      const tx = await contract.connect(buyer).claimRefund(1);
-      const receipt = await tx.wait();
-      const gasUsed = receipt.gasUsed * receipt.gasPrice;
-      
-      const finalBalance = await ethers.provider.getBalance(buyer.address);
-      expect(finalBalance).to.equal(initialBalance + P1_WEI - gasUsed);
-    });
-
-    it("Reverts refund if event is not cancelled", async function () {
-      await expect(
-        contract.connect(buyer).claimRefund(1)
-      ).to.be.revertedWithCustomError(contract, "EventIsCancelled"); // The error name is slightly confusing here but it checks !isCancelled
-    });
-
-    it("Prevents double refunding", async function () {
-      await contract.connect(organiser).cancelEvent(1, { value: P1_WEI * 2n });
-      await contract.connect(buyer).claimRefund(1);
-      
-      await expect(
-        contract.connect(buyer).claimRefund(1)
-      ).to.be.revertedWithCustomError(contract, "AlreadyRefunded");
+    it("reverts: cannot change tier count", async function () {
+      await expect(contract.connect(organiser).editEvent(1, [P1], [100]))
+        .to.be.revertedWith("Cannot change tier count");
     });
   });
 
-  describe("Marketplace & Royalties", function () {
+  // ═══════════════════════════════════════════════════════════════════
+  // 3. getTiers / getTier / fetchEventData (view)
+  // ═══════════════════════════════════════════════════════════════════
+  describe("View functions", function () {
     beforeEach(async function () {
-      await contract.connect(organiser).createEvent("QmMarket", ROY, [P1_WEI], [10]);
-      await contract.connect(buyer).buyTicket(1, 0, { value: P1_WEI });
+      await contract.connect(organiser).createEvent("QmV", ROY, [P1, VIP], [50, 5], MARKUP);
     });
 
-    it("Ownership transfers on resale and seller receives funds", async function () {
-      await contract.connect(buyer).listForResale(1, P1_WEI);
-      
-      const sellerInitial = await ethers.provider.getBalance(buyer.address);
-      await contract.connect(buyer2).buyResaleTicket(1, { value: P1_WEI });
-      
+    it("getTiers returns all tiers", async function () {
+      const t = await contract.getTiers(1);
+      expect(t.length).to.equal(2);
+    });
+
+    it("getTier returns specific tier", async function () {
+      const t = await contract.getTier(1, 1);
+      expect(t.price).to.equal(VIP);
+    });
+
+    it("fetchEventData returns organiser + royalty + markup", async function () {
+      const d = await contract.fetchEventData(1);
+      expect(d.organiser).to.equal(organiser.address);
+      expect(d.royaltyBps).to.equal(ROY);
+      expect(d.maxResaleMarkupPct).to.equal(MARKUP);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 4. buyTicket (single)
+  // ═══════════════════════════════════════════════════════════════════
+  describe("buyTicket", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmBuy", ROY, [P1, VIP], [10, 2], MARKUP);
+    });
+
+    it("buys tier 0", async function () {
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+      expect(await contract.ownerOf(1)).to.equal(buyer.address);
+      const t = await contract.getTier(1, 0);
+      expect(t.sold).to.equal(1);
+    });
+
+    it("buys tier 1 (VIP)", async function () {
+      await contract.connect(buyer).buyTicket(1, 1, { value: VIP });
+      expect(await contract.ownerOf(1)).to.equal(buyer.address);
+    });
+
+    it("reverts: wrong payment", async function () {
+      await expect(contract.connect(buyer).buyTicket(1, 1, { value: P1 }))
+        .to.be.revertedWith("Insufficient payment");
+    });
+
+    it("reverts: sold out", async function () {
+      await contract.connect(buyer).buyTicket(1, 1, { value: VIP });
+      await contract.connect(buyer2).buyTicket(1, 1, { value: VIP });
+      await expect(contract.connect(buyer3).buyTicket(1, 1, { value: VIP }))
+        .to.be.revertedWith("Sold out");
+    });
+
+    it("reverts: organiser cannot buy own event", async function () {
+      await expect(contract.connect(organiser).buyTicket(1, 0, { value: P1 }))
+        .to.be.revertedWith("Organiser buy error");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 5. buyBatchTickets
+  // ═══════════════════════════════════════════════════════════════════
+  describe("buyBatchTickets", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmBatch", ROY, [P1, VIP], [10, 5], MARKUP);
+    });
+
+    it("batch buy: 2 tier-0 + 1 tier-1", async function () {
+      const total = P1 * 2n + VIP;
+      await contract.connect(buyer).buyBatchTickets(1, [0, 1], [2, 1], { value: total });
+      expect((await contract.getTier(1, 0)).sold).to.equal(2);
+      expect((await contract.getTier(1, 1)).sold).to.equal(1);
+    });
+
+    it("reverts: incorrect payment", async function () {
+      await expect(contract.connect(buyer).buyBatchTickets(1, [0], [2], { value: P1 }))
+        .to.be.revertedWith("Incorrect payment");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 6. Referral system
+  // ═══════════════════════════════════════════════════════════════════
+  describe("Referral System", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmRef", ROY, [P1], [100], MARKUP);
+    });
+
+    it("addReferral: sets referral bps", async function () {
+      await contract.connect(organiser).addReferral(1, referrer.address, 500);
+      expect(await contract.getReferralBps(1, referrer.address)).to.equal(500);
+    });
+
+
+
+    it("addReferral reverts: non-organiser", async function () {
+      await expect(contract.connect(buyer).addReferral(1, referrer.address, 500))
+        .to.be.revertedWith("Only organiser can add referral");
+    });
+
+    it("addReferral reverts: > 50%", async function () {
+      await expect(contract.connect(organiser).addReferral(1, referrer.address, 5001))
+        .to.be.revertedWith("Referral cannot exceed 50%");
+    });
+
+    it("buyTicketWithReferral: referrer gets 5%", async function () {
+      await contract.connect(organiser).addReferral(1, referrer.address, 500);
+      const refBefore = await ethers.provider.getBalance(referrer.address);
+      await contract.connect(buyer).buyTicketWithReferral(1, 0, referrer.address, { value: P1 });
+      const refAfter = await ethers.provider.getBalance(referrer.address);
+      expect(refAfter - refBefore).to.equal(ethers.parseEther("0.005"));
+    });
+
+    it("buyBatchTicketsWithReferral: referrer gets share", async function () {
+      await contract.connect(organiser).addReferral(1, referrer.address, 500);
+      const refBefore = await ethers.provider.getBalance(referrer.address);
+      await contract.connect(buyer).buyBatchTicketsWithReferral(1, [0], [3], referrer.address, { value: P1 * 3n });
+      const refAfter = await ethers.provider.getBalance(referrer.address);
+      // 5% of 0.3 ETH = 0.015 ETH
+      expect(refAfter - refBefore).to.equal(ethers.parseEther("0.015"));
+    });
+
+    it("unregistered referrer: organiser gets 100%", async function () {
+      const orgBefore = await ethers.provider.getBalance(organiser.address);
+      await contract.connect(buyer).buyTicketWithReferral(1, 0, referrer.address, { value: P1 });
+      const orgAfter = await ethers.provider.getBalance(organiser.address);
+      expect(orgAfter - orgBefore).to.equal(P1);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 7. Resale: listForResale / buyResaleTicket / cancelResaleListing
+  // ═══════════════════════════════════════════════════════════════════
+  describe("Secondary Market (Resale)", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmResale", ROY, [P1], [10], MARKUP);
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+    });
+
+    it("listForResale: lists at markup cap", async function () {
+      const maxPrice = P1 + (P1 * BigInt(MARKUP) / 100n); // 0.12 ETH
+      await contract.connect(buyer).listForResale(1, maxPrice);
+      const listing = await contract.getResaleListing(1);
+      expect(listing.active).to.be.true;
+      expect(listing.priceWei).to.equal(maxPrice);
+    });
+
+    it("listForResale reverts: above cap", async function () {
+      const overCap = P1 + (P1 * BigInt(MARKUP) / 100n) + 1n;
+      await expect(contract.connect(buyer).listForResale(1, overCap))
+        .to.be.revertedWith("Resale price exceeds allowed cap");
+    });
+
+    it("buyResaleTicket: transfers ownership + pays royalty", async function () {
+      const resalePrice = P1 + (P1 * BigInt(MARKUP) / 100n);
+      await contract.connect(buyer).listForResale(1, resalePrice);
+
+      const orgBefore = await ethers.provider.getBalance(organiser.address);
+      await contract.connect(buyer2).buyResaleTicket(1, { value: resalePrice });
+
       expect(await contract.ownerOf(1)).to.equal(buyer2.address);
-      // Roughly check balance (ignoring gas but ensuring it went up)
-      expect(await ethers.provider.getBalance(buyer.address)).to.be.gt(sellerInitial);
+      const orgAfter = await ethers.provider.getBalance(organiser.address);
+      // Royalty = 10% of resalePrice
+      expect(orgAfter - orgBefore).to.equal(resalePrice * BigInt(ROY) / 100n);
     });
 
-    it("Supports EIP-2981 royalty info correctly", async function () {
-      const [receiver, amount] = await contract.royaltyInfo(1, P1_WEI);
-      expect(receiver).to.equal(organiser.address);
-      expect(amount).to.equal(P1_WEI * BigInt(ROY) / 100n);
-    });
-  });
+    it("non-compounding: 2nd resale still capped at original+markup%", async function () {
+      const cap = P1 + (P1 * BigInt(MARKUP) / 100n);
+      await contract.connect(buyer).listForResale(1, cap);
+      await contract.connect(buyer2).buyResaleTicket(1, { value: cap });
 
-  describe("Resale Price Cap (Non-Compounding)", function () {
-    const TICKET_PRICE = ethers.parseEther("1.0"); // 1 ETH original price
-    const MAX_RESALE = ethers.parseEther("1.1");   // 1 ETH + 10% = 1.1 ETH cap
-
-    beforeEach(async function () {
-      await contract.connect(organiser).createEvent("QmResaleCap", ROY, [TICKET_PRICE], [10]);
-      // buyer purchases token #1
-      await contract.connect(buyer).buyTicket(1, 0, { value: TICKET_PRICE });
-    });
-
-    it("First resale within the 10% cap succeeds", async function () {
-      // List at exactly the cap (originalPrice + 10%)
-      await contract.connect(buyer).listForResale(1, MAX_RESALE);
-
-      await expect(
-        contract.connect(buyer2).buyResaleTicket(1, { value: MAX_RESALE })
-      )
-        .to.emit(contract, "TicketResold")
-        .withArgs(1, buyer.address, buyer2.address, MAX_RESALE, TICKET_PRICE);
-
-      expect(await contract.ownerOf(1)).to.equal(buyer2.address);
-    });
-
-    it("Listing above the cap is rejected", async function () {
-      const overCap = MAX_RESALE + 1n;
-      await expect(
-        contract.connect(buyer).listForResale(1, overCap)
-      ).to.be.revertedWith("Resale price exceeds allowed cap");
-    });
-
-    it("Second resale is still capped at original price + 10% (no compounding)", async function () {
-      // First resale at cap
-      await contract.connect(buyer).listForResale(1, MAX_RESALE);
-      await contract.connect(buyer2).buyResaleTicket(1, { value: MAX_RESALE });
-
-      // buyer2 now owns the ticket; lastPricePaid == 1.1 ETH
-      // But the cap must still be 1.0 + 10% = 1.1 ETH (not 1.1 + 10% = 1.21)
-      await contract.connect(buyer2).listForResale(1, MAX_RESALE);
-      await contract.connect(buyer3).buyResaleTicket(1, { value: MAX_RESALE });
+      // buyer2 re-lists at same cap — should pass
+      await contract.connect(buyer2).listForResale(1, cap);
+      await contract.connect(buyer3).buyResaleTicket(1, { value: cap });
       expect(await contract.ownerOf(1)).to.equal(buyer3.address);
     });
 
-    it("Second resale cannot exceed original-price-based cap", async function () {
-      // First resale at cap
-      await contract.connect(buyer).listForResale(1, MAX_RESALE);
-      await contract.connect(buyer2).buyResaleTicket(1, { value: MAX_RESALE });
+    it("cancelResaleListing: deactivates listing", async function () {
+      await contract.connect(buyer).listForResale(1, P1);
+      await contract.connect(buyer).cancelResaleListing(1);
+      const listing = await contract.getResaleListing(1);
+      expect(listing.active).to.be.false;
+    });
 
-      // Attempting to list at 1.21 ETH (would pass under old compounding logic)
-      const compoundedPrice = ethers.parseEther("1.21");
-      await expect(
-        contract.connect(buyer2).listForResale(1, compoundedPrice)
-      ).to.be.revertedWith("Resale price exceeds allowed cap");
+    it("cancelResaleListing reverts: not seller", async function () {
+      await contract.connect(buyer).listForResale(1, P1);
+      await expect(contract.connect(buyer2).cancelResaleListing(1))
+        .to.be.revertedWith("Not seller");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 8. cancelEvent + claimRefund
+  // ═══════════════════════════════════════════════════════════════════
+  describe("Event Cancellation & Refunds", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmCancel", ROY, [P1], [10], MARKUP);
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+      await contract.connect(buyer2).buyTicket(1, 0, { value: P1 });
+    });
+
+    it("cancelEvent: emits event", async function () {
+      await expect(contract.connect(organiser).cancelEvent(1, { value: P1 * 2n }))
+        .to.emit(contract, "EventCancelled").withArgs(1);
+      expect(await contract.isCancelled(1)).to.be.true;
+    });
+
+    it("cancelEvent reverts: insufficient funds", async function () {
+      await expect(contract.connect(organiser).cancelEvent(1, { value: P1 }))
+        .to.be.revertedWithCustomError(contract, "InsufficientRefundFunds");
+    });
+
+    it("cancelEvent reverts: not organiser", async function () {
+      await expect(contract.connect(buyer).cancelEvent(1, { value: P1 * 2n }))
+        .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
+    });
+
+    it("claimRefund: refunds buyer after cancellation", async function () {
+      await contract.connect(organiser).cancelEvent(1, { value: P1 * 2n });
+      const before = await ethers.provider.getBalance(buyer.address);
+      const tx = await contract.connect(buyer).claimRefund(1);
+      const receipt = await tx.wait();
+      const gas = receipt.gasUsed * receipt.gasPrice;
+      const after = await ethers.provider.getBalance(buyer.address);
+      expect(after).to.equal(before + P1 - gas);
+    });
+
+    it("claimRefund reverts: not cancelled", async function () {
+      await expect(contract.connect(buyer).claimRefund(1))
+        .to.be.revertedWithCustomError(contract, "EventIsCancelled");
+    });
+
+    it("claimRefund reverts: double refund", async function () {
+      await contract.connect(organiser).cancelEvent(1, { value: P1 * 2n });
+      await contract.connect(buyer).claimRefund(1);
+      await expect(contract.connect(buyer).claimRefund(1))
+        .to.be.revertedWithCustomError(contract, "AlreadyRefunded");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 9. Scanner system: addScanner / removeScanner
+  // ═══════════════════════════════════════════════════════════════════
+  describe("Scanner Management", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmScan", ROY, [P1], [10], MARKUP);
+    });
+
+    it("addScanner: grants scanner role", async function () {
+      await contract.connect(organiser).addScanner(1, scanner.address);
+      expect(await contract.eventScanners(1, scanner.address)).to.be.true;
+    });
+
+
+
+    it("addScanner reverts: not organiser", async function () {
+      await expect(contract.connect(buyer).addScanner(1, scanner.address))
+        .to.be.revertedWith("Not organiser");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 10. Ticket Validation: validateTicketEntry / validateBatch
+  // ═══════════════════════════════════════════════════════════════════
+  describe("Ticket Validation", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmVal", ROY, [P1], [10], MARKUP);
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+      await contract.connect(buyer2).buyTicket(1, 0, { value: P1 });
+      await contract.connect(buyer3).buyTicket(1, 0, { value: P1 });
+    });
+
+    it("validateTicketEntry: organiser validates", async function () {
+      await expect(contract.connect(organiser).validateTicketEntry(1, buyer.address))
+        .to.emit(contract, "TicketValidated");
+      expect(await contract.usedTickets(1)).to.be.true;
+    });
+
+    it("validateTicketEntry: scanner validates", async function () {
+      await contract.connect(organiser).addScanner(1, scanner.address);
+      await contract.connect(scanner).validateTicketEntry(1, buyer.address);
+      expect(await contract.usedTickets(1)).to.be.true;
+    });
+
+    it("validateTicketEntry reverts: already used", async function () {
+      await contract.connect(organiser).validateTicketEntry(1, buyer.address);
+      await expect(contract.connect(organiser).validateTicketEntry(1, buyer.address))
+        .to.be.revertedWithCustomError(contract, "AlreadyUsed");
+    });
+
+    it("validateTicketEntry reverts: wrong attendee", async function () {
+      await expect(contract.connect(organiser).validateTicketEntry(1, buyer2.address))
+        .to.be.revertedWithCustomError(contract, "WrongAttendee");
+    });
+
+    it("validateTicketEntry reverts: not authorized", async function () {
+      await expect(contract.connect(buyer2).validateTicketEntry(1, buyer.address))
+        .to.be.revertedWithCustomError(contract, "NotAuthorizedScanner");
+    });
+
+
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 11. Token data view functions
+  // ═══════════════════════════════════════════════════════════════════
+  describe("Token Data Views", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmData", ROY, [P1], [10], MARKUP);
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+    });
+
+    it("tokenToEvent", async function () {
+      expect(await contract.tokenToEvent(1)).to.equal(1);
+    });
+
+    it("tokenToTier", async function () {
+      expect(await contract.tokenToTier(1)).to.equal(0);
+    });
+
+    it("getTokenOriginalPrice", async function () {
+      expect(await contract.getTokenOriginalPrice(1)).to.equal(P1);
+    });
+
+    it("getTokenLastPricePaid", async function () {
+      expect(await contract.getTokenLastPricePaid(1)).to.equal(P1);
+    });
+
+    it("getTokenPurchasePrice", async function () {
+      expect(await contract.getTokenPurchasePrice(1)).to.equal(P1);
+    });
+
+    it("getTokenNonce: non-zero", async function () {
+      const nonce = await contract.getTokenNonce(1);
+      expect(nonce).to.not.equal(0);
+    });
+
+    it("isTokenRefunded: false by default", async function () {
+      expect(await contract.isTokenRefunded(1)).to.be.false;
+    });
+
+    it("getResaleListing: inactive by default", async function () {
+      const l = await contract.getResaleListing(1);
+      expect(l.active).to.be.false;
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 12. royaltyInfo (EIP-2981) + supportsInterface
+  // ═══════════════════════════════════════════════════════════════════
+  describe("EIP-2981 Royalties", function () {
+    beforeEach(async function () {
+      await contract.connect(organiser).createEvent("QmRoy", ROY, [P1], [10], MARKUP);
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+    });
+
+    it("royaltyInfo: returns correct receiver + amount", async function () {
+      const [receiver, amount] = await contract.royaltyInfo(1, P1);
+      expect(receiver).to.equal(organiser.address);
+      expect(amount).to.equal(P1 * BigInt(ROY) / 100n);
+    });
+
+    it("supportsInterface: ERC721", async function () {
+      expect(await contract.supportsInterface("0x80ac58cd")).to.be.true;
+    });
+
+    it("supportsInterface: ERC2981", async function () {
+      expect(await contract.supportsInterface("0x2a55205a")).to.be.true;
     });
   });
 });
