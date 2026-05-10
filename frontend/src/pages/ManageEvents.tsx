@@ -152,6 +152,13 @@ export const ManageEvents: React.FC = () => {
       return;
     }
 
+    const royaltyVal = Math.floor(parseFloat(formData.royalty || '0'));
+    const markupVal = Math.floor(parseFloat(formData.resaleMarkup || '10'));
+    if (markupVal > 0 && royaltyVal >= markupVal) {
+      setError(`Secondary market royalty (${royaltyVal}%) must be less than max resale markup (${markupVal}%). Otherwise resellers are guaranteed a loss.`);
+      return;
+    }
+
     setIsMining(true);
     try {
       if (!(window as any).ethereum) throw new Error("MetaMask not found");

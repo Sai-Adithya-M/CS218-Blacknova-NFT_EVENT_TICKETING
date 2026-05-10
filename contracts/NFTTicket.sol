@@ -105,6 +105,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         require(prices.length > 0, "At least one tier required");
         require(prices.length <= 5, "Max 5 tiers allowed");
         require(maxResaleMarkupPct <= 100, "Markup <= 100%");
+        require(maxResaleMarkupPct == 0 || royaltyBps < maxResaleMarkupPct, "Royalty must be less than max resale markup");
 
         uint256 eventId = nextEventId;
         events[eventId] = Event({
