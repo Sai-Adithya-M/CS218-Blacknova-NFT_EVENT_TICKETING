@@ -1,5 +1,7 @@
 # NETIX — Decentralized NFT Ticketing Revolution 
 
+**Live Demo:** [https://main.d3arrco1req0rn.amplifyapp.com](https://main.d3arrco1req0rn.amplifyapp.com)
+
 ![Banner](https://img.shields.io/badge/NETIX-Web3--Ticketing-646CFF?style=for-the-badge&logo=ethereum&logoColor=white)
 
 **NETIX** is a next-generation decentralized application (dApp) designed to transform the event ticketing industry (Project 7: NFT Event Ticketing). By utilizing Non-Fungible Tokens (NFTs) on the Ethereum blockchain, NETIX eliminates ticket fraud, ensures verifiable ownership, and establishes a fair secondary market with automated royalty enforcement.
