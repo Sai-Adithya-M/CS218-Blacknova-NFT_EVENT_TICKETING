@@ -43,6 +43,11 @@ describe("NFTTicket — Full Gas Report", function () {
       expect(tiers.length).to.equal(5);
     });
 
+    it("reverts: empty IPFS hash", async function () {
+      await expect(contract.connect(organiser).createEvent("", ROY, [P1], [10], MARKUP))
+        .to.be.revertedWithCustomError(contract, "EmptyIPFS");
+    });
+
     it("reverts: tier mismatch", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1], [10, 20], MARKUP))
         .to.be.revertedWithCustomError(contract, "TierMismatch");
@@ -96,6 +101,27 @@ describe("NFTTicket — Full Gas Report", function () {
       expect(tiers[1].maxSupply).to.equal(20);
     });
 
+    it("reverts: event not found", async function () {
+      await expect(contract.connect(organiser).editEvent(999, [P1], [100]))
+        .to.be.revertedWithCustomError(contract, "EventNotFound");
+    });
+
+    it("reverts: tier mismatch", async function () {
+      await expect(contract.connect(organiser).editEvent(1, [P1, VIP], [100]))
+        .to.be.revertedWithCustomError(contract, "TierMismatch");
+    });
+
+    it("reverts: tier count changed", async function () {
+      await expect(contract.connect(organiser).editEvent(1, [P1, VIP, P2], [100, 10, 50]))
+        .to.be.revertedWithCustomError(contract, "TierCountChanged");
+    });
+
+    it("reverts: supply below sold", async function () {
+      await contract.connect(buyer).buyTicket(1, 0, { value: P1 });
+      await expect(contract.connect(organiser).editEvent(1, [P1, VIP], [0, 10]))
+        .to.be.revertedWithCustomError(contract, "BelowSold");
+    });
+
     it("reverts: non-organiser", async function () {
       await expect(contract.connect(buyer).editEvent(1, [P1, VIP], [100, 10]))
         .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
@@ -123,6 +149,11 @@ describe("NFTTicket — Full Gas Report", function () {
     it("getTier returns specific tier", async function () {
       const t = await contract.getTier(1, 1);
       expect(t.price).to.equal(VIP);
+    });
+
+    it("getTier reverts: invalid tier", async function () {
+      await expect(contract.getTier(1, 99))
+        .to.be.revertedWithCustomError(contract, "InvalidTier");
     });
 
     it("fetchEventData returns organiser + royalty + markup", async function () {
@@ -168,6 +199,17 @@ describe("NFTTicket — Full Gas Report", function () {
     it("reverts: organiser cannot buy own event", async function () {
       await expect(contract.connect(organiser).buyTicket(1, 0, { value: P1 }))
         .to.be.revertedWithCustomError(contract, "OrganiserCannotBuy");
+    });
+
+    it("reverts: event is cancelled", async function () {
+      await contract.connect(organiser).cancelEvent(1);
+      await expect(contract.connect(buyer).buyTicket(1, 0, { value: P1 }))
+        .to.be.revertedWithCustomError(contract, "EventIsCancelled");
+    });
+
+    it("reverts: event not found", async function () {
+      await expect(contract.connect(buyer).buyTicket(999, 0, { value: P1 }))
+        .to.be.revertedWithCustomError(contract, "EventNotFound");
     });
   });
 
@@ -367,6 +409,22 @@ describe("NFTTicket — Full Gas Report", function () {
 
     it("addScanner reverts: not organiser", async function () {
       await expect(contract.connect(buyer).addScanner(1, scanner.address))
+        .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
+    });
+
+    it("addScanner reverts: invalid address", async function () {
+      await expect(contract.connect(organiser).addScanner(1, ethers.ZeroAddress))
+        .to.be.revertedWithCustomError(contract, "InvalidAddress");
+    });
+
+    it("removeScanner: revokes scanner role", async function () {
+      await contract.connect(organiser).addScanner(1, scanner.address);
+      await contract.connect(organiser).removeScanner(1, scanner.address);
+      expect(await contract.eventScanners(1, scanner.address)).to.be.false;
+    });
+
+    it("removeScanner reverts: not organiser", async function () {
+      await expect(contract.connect(buyer).removeScanner(1, scanner.address))
         .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
     });
   });
