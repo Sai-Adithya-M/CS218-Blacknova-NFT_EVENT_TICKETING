@@ -127,14 +127,12 @@ graph TD
 ---
 
 ##  Screenshots
-> [!IMPORTANT]
-> Save your screenshots as `marketplace.png` and `mytickets.png` in the **root directory** of this project for them to appear here.
 
-### 🛒 Marketplace
-![Marketplace](./marketplace.png)
+### Marketplace
+![Marketplace](./Assests/Marketplace.jpeg)
 
 ### My Tickets
-![My Tickets](./mytickets.png)
+![My Tickets](./Assests/My_Tickets.jpeg)
 
 ---
 
@@ -220,7 +218,7 @@ To deploy a new instance of the **NFTTicket** contract:
 
 ---
 
-## ⚡ Gas Optimisation
+## Gas Optimisation
 
 We prioritized gas efficiency to ensure the platform remains affordable during peak minting periods.
 
@@ -237,7 +235,7 @@ We prioritized gas efficiency to ensure the platform remains affordable during p
 
 ---
 
-## 🛡️ Known Issues & Limitations
+##  Known Issues & Limitations
 
 - **IPFS Latency**: As noted in Troubleshooting, metadata loading from IPFS can sometimes take 2-3 minutes depending on network congestion.
 - **Fixed Tier Count**: Currently, an event's tier count is fixed at creation time; organizers can edit prices/supplies but cannot add new tiers post-deployment.
@@ -249,7 +247,7 @@ We prioritized gas efficiency to ensure the platform remains affordable during p
 
 The NETIX smart contract implements the following core functions with full NatSpec documentation for developers.
 
-### 🛠️ Event Management
+###  Event Management
 - **`createEvent(string ipfsHash, uint8 royaltyBps, uint256[] prices, uint256[] supplies, uint8 maxResaleMarkupPct)`**
     - `@notice`: Initializes a new event with multiple tiers, royalty rates, and resale caps.
     - `@param ipfsHash`: The IPFS CID containing event metadata (banners, description).
