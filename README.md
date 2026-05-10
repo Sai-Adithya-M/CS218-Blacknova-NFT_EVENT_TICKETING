@@ -299,11 +299,8 @@ The NETIX smart contract implements the following core functions with full NatSp
 
 - **Transaction Reverted**: 
     - Ensure you have enough Sepolia ETH for gas. 
-    - If buying, check if the tier is sold out.
     - If you are the event organizer, remember that **you cannot buy your own tickets**.
 - **Price Precision Issue**: If you set an ETH price below `0.0004`, it may be rounded off to `0.001` in the system display. Ensure you check the final price before confirming.
-- **Referral Not Working**: Only the organizer can authorize a referrer. Ensure the promoter's address was added via `addReferral` with a valid bps (max 50%).
-- **Scanner Access Denied**: Ensure your wallet address has been added to the authorized scanners list for that specific event.
 - **Wallet Not Connecting**: Ensure your MetaMask is set to the **Sepolia Test Network**.
 - **Images Not Loading**: IPFS gateways can sometimes be slow(2-3 mins), Ensure your Pinata keys are correctly configured and the hash is valid.
 
