@@ -1,4 +1,4 @@
-# Project 7: NETIX — Decentralized NFT Ticketing Revolution 
+# NETIX — Decentralized NFT Ticketing Revolution 
 
 ![Banner](https://img.shields.io/badge/NETIX-Web3--Ticketing-646CFF?style=for-the-badge&logo=ethereum&logoColor=white)
 
