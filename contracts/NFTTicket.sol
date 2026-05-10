@@ -61,6 +61,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     // eventId => (referrer address => percentage in basis points, e.g. 500 = 5%)
     mapping(uint256 => mapping(address => uint256)) public eventReferrals;
 
+    // ── Custom errors (saves ~200 gas each vs require strings) ───────────
     error EventIsCancelled();
     error NotEventOrganiser();
     error NotTicketOwner();
@@ -73,8 +74,32 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     error AlreadyUsed();
     error InvalidToken();
     error WrongAttendee();
-
-    // Legacy mappings removed in favor of eventTiers
+    error EmptyIPFS();
+    error RoyaltyTooHigh();
+    error TierMismatch();
+    error NoTiers();
+    error TooManyTiers();
+    error MarkupTooHigh();
+    error RoyaltyExceedsMarkup();
+    error EventNotFound();
+    error OrganiserCannotBuy();
+    error InvalidTier();
+    error TierSoldOut();
+    error WrongPayment();
+    error TransferFailed();
+    error NotOwner();
+    error ZeroPrice();
+    error ResaleCapExceeded();
+    error NotForSale();
+    error SellerMismatch();
+    error NoListing();
+    error NotSeller();
+    error InvalidAddress();
+    error CannotReferSelf();
+    error ReferralTooHigh();
+    error TierCountChanged();
+    error BelowSold();
+    error LengthMismatch();
 
     event EventCreated(uint256 indexed eventId, address indexed organiser, string ipfsHash);
     event EventUpdated(uint256 indexed eventId, uint24 newMaxTickets, uint256 newPriceWei);
@@ -92,20 +117,32 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
     constructor() ERC721("NFTEventTicket", "NETIX") {}
 
+    /// @dev Gas-optimized ETH transfer using assembly (saves ~200 gas vs .call)
+    function _sendETH(address to, uint256 amount) internal {
+        assembly {
+            let s := call(gas(), to, amount, 0, 0, 0, 0)
+            if iszero(s) {
+                mstore(0x00, 0x90b8ec18) // TransferFailed()
+                revert(0x1c, 0x04)
+            }
+        }
+    }
+
     function createEvent(
-        string memory ipfsHash,
+        string calldata ipfsHash,
         uint8 royaltyBps,
-        uint256[] memory prices,
-        uint256[] memory supplies,
+        uint256[] calldata prices,
+        uint256[] calldata supplies,
         uint8 maxResaleMarkupPct
     ) external {
-        require(bytes(ipfsHash).length > 0, "IPFS hash required");
-        require(royaltyBps <= 100, "Royalty <= 100%");
-        require(prices.length == supplies.length, "Tier mismatch");
-        require(prices.length > 0, "At least one tier required");
-        require(prices.length <= 5, "Max 5 tiers allowed");
-        require(maxResaleMarkupPct <= 100, "Markup <= 100%");
-        require(maxResaleMarkupPct == 0 || royaltyBps < maxResaleMarkupPct, "Royalty must be less than max resale markup");
+        if (bytes(ipfsHash).length == 0) revert EmptyIPFS();
+        if (royaltyBps > 100) revert RoyaltyTooHigh();
+        uint256 len = prices.length;
+        if (len != supplies.length) revert TierMismatch();
+        if (len == 0) revert NoTiers();
+        if (len > 5) revert TooManyTiers();
+        if (maxResaleMarkupPct > 100) revert MarkupTooHigh();
+        if (maxResaleMarkupPct != 0 && royaltyBps >= maxResaleMarkupPct) revert RoyaltyExceedsMarkup();
 
         uint256 eventId = nextEventId;
         events[eventId] = Event({
@@ -114,30 +151,34 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             maxResaleMarkupPct: maxResaleMarkupPct
         });
 
-        for (uint256 i = 0; i < prices.length; i++) {
+        for (uint256 i = 0; i < len; ) {
             eventTiers[eventId].push(Tier(prices[i], supplies[i], 0));
+            unchecked { i++; }
         }
 
         emit EventCreated(eventId, msg.sender, ipfsHash);
-        nextEventId++;
+        unchecked { nextEventId++; }
     }
 
     function editEvent(
         uint256 eventId,
-        uint256[] memory newPrices,
-        uint256[] memory newSupplies
+        uint256[] calldata newPrices,
+        uint256[] calldata newSupplies
     ) external {
         Event storage evt = events[eventId];
-        require(evt.organiser != address(0), "Event non-existent");
-        if (msg.sender != evt.organiser) revert NotEventOrganiser();
-        require(newPrices.length == newSupplies.length, "Tier mismatch");
-        require(newPrices.length == eventTiers[eventId].length, "Cannot change tier count");
+        address org = evt.organiser;
+        if (org == address(0)) revert EventNotFound();
+        if (msg.sender != org) revert NotEventOrganiser();
+        uint256 len = newPrices.length;
+        if (len != newSupplies.length) revert TierMismatch();
+        if (len != eventTiers[eventId].length) revert TierCountChanged();
 
-        for (uint256 i = 0; i < newPrices.length; i++) {
+        for (uint256 i = 0; i < len; ) {
             Tier storage t = eventTiers[eventId][i];
-            require(newSupplies[i] >= t.sold, "Below sold");
+            if (newSupplies[i] < t.sold) revert BelowSold();
             t.price = newPrices[i];
             t.maxSupply = newSupplies[i];
+            unchecked { i++; }
         }
 
         emit EventUpdated(eventId, 0, newPrices[0]);
@@ -148,19 +189,19 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     }
 
     function getTier(uint256 eventId, uint256 tierId) external view returns (Tier memory) {
-        require(tierId < eventTiers[eventId].length, "Invalid tierId");
+        if (tierId >= eventTiers[eventId].length) revert InvalidTier();
         return eventTiers[eventId][tierId];
     }
 
     function addScanner(uint256 eventId, address scanner) external {
-        require(msg.sender == events[eventId].organiser, "Not organiser");
-        require(scanner != address(0), "Invalid address");
+        if (msg.sender != events[eventId].organiser) revert NotEventOrganiser();
+        if (scanner == address(0)) revert InvalidAddress();
         eventScanners[eventId][scanner] = true;
         emit ScannerAdded(eventId, scanner);
     }
 
     function removeScanner(uint256 eventId, address scanner) external {
-        require(msg.sender == events[eventId].organiser, "Not organiser");
+        if (msg.sender != events[eventId].organiser) revert NotEventOrganiser();
         eventScanners[eventId][scanner] = false;
         emit ScannerRemoved(eventId, scanner);
     }
@@ -177,16 +218,30 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         if (isCancelled[eventId]) revert EventIsCancelled();
 
         Event storage evt = events[eventId];
-        require(evt.organiser != address(0), "Event non-existent");
-        require(buyer != evt.organiser, "Organiser buy error");
-        require(tierId < eventTiers[eventId].length, "Invalid tierId");
+        address org = evt.organiser;
+        if (org == address(0)) revert EventNotFound();
+        if (buyer == org) revert OrganiserCannotBuy();
 
+        // Solidity array access reverts on OOB — no need for explicit length check
         Tier storage t = eventTiers[eventId][tierId];
-        require(t.sold < t.maxSupply, "Sold out");
-        require(amount == t.price, "Insufficient payment");
+        uint256 soldCount = t.sold;
+        if (soldCount >= t.maxSupply) revert TierSoldOut();
+        uint256 tierPrice = t.price;
+        if (amount != tierPrice) revert WrongPayment();
 
         uint256 tokenId = nextTokenId;
-        uint80 nonce = uint80(uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, buyer, tokenId))));
+
+        // Assembly nonce: avoids abi.encodePacked memory allocation overhead
+        uint80 nonce;
+        assembly {
+            let fmp := mload(0x40)
+            mstore(0x00, prevrandao())
+            mstore(0x20, timestamp())
+            mstore(0x40, buyer)
+            mstore(0x60, tokenId)
+            nonce := keccak256(0x00, 0x80)
+            mstore(0x40, fmp)
+        }
         
         _mint(buyer, tokenId);
         _tokenData[tokenId] = TokenData({
@@ -198,99 +253,124 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             nonce: nonce
         });
 
-        t.sold++;
-        eventTicketsSold[eventId]++;
-        eventRefundLiability[eventId] += amount;
+        unchecked {
+            t.sold = soldCount + 1;
+            eventTicketsSold[eventId]++;
+            nextTokenId = tokenId + 1;
+            eventRefundLiability[eventId] += amount;
+        }
         
         emit TicketMinted(tokenId, eventId, buyer, uint8(tierId));
-        nextTokenId++;
 
         // Handle referral payment
-        uint256 organiserAmount = amount;
-        if (referrer != address(0) && referrer != evt.organiser && referrer != buyer && eventReferrals[eventId][referrer] > 0) {
-            uint256 referralBps = eventReferrals[eventId][referrer];
-            uint256 referrerAmount = (amount * referralBps) / 10000;
-            organiserAmount = amount - referrerAmount;
-            
-            (bool successRef, ) = payable(referrer).call{value: referrerAmount}("");
-            require(successRef, "Referral transfer failed");
-            emit ReferralPaid(eventId, referrer, referrerAmount);
+        if (referrer != address(0) && referrer != org && referrer != buyer) {
+            uint256 refBps = eventReferrals[eventId][referrer];
+            if (refBps > 0) {
+                uint256 referrerAmount;
+                unchecked { referrerAmount = (amount * refBps) / 10000; }
+                _sendETH(referrer, referrerAmount);
+                emit ReferralPaid(eventId, referrer, referrerAmount);
+                unchecked { amount -= referrerAmount; }
+            }
         }
 
-        (bool success, ) = payable(evt.organiser).call{value: organiserAmount}("");
-        require(success, "Transfer failed");
+        _sendETH(org, amount);
     }
 
-    function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) external payable nonReentrant {
+    function buyBatchTickets(uint256 eventId, uint256[] calldata tierIds, uint24[] calldata quantities) external payable nonReentrant {
         _buyBatchInternal(eventId, tierIds, quantities, address(0));
     }
 
-    function buyBatchTicketsWithReferral(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) external payable nonReentrant {
+    function buyBatchTicketsWithReferral(uint256 eventId, uint256[] calldata tierIds, uint24[] calldata quantities, address referrer) external payable nonReentrant {
         _buyBatchInternal(eventId, tierIds, quantities, referrer);
     }
 
-    function _buyBatchInternal(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) internal {
-        require(tierIds.length == quantities.length, "Input mismatch");
+    function _buyBatchInternal(uint256 eventId, uint256[] calldata tierIds, uint24[] calldata quantities, address referrer) internal {
+        uint256 len = tierIds.length;
+        if (len != quantities.length) revert LengthMismatch();
         if (isCancelled[eventId]) revert EventIsCancelled();
 
         Event storage evt = events[eventId];
-        require(evt.organiser != address(0), "Event non-existent");
-        require(msg.sender != evt.organiser, "Organiser buy error");
+        address org = evt.organiser;
+        if (org == address(0)) revert EventNotFound();
+        if (msg.sender == org) revert OrganiserCannotBuy();
 
-        uint256 totalRequired = 0;
-        for (uint256 i = 0; i < tierIds.length; i++) {
-            uint256 tId = tierIds[i];
-            require(tId < eventTiers[eventId].length, "Invalid tierId");
-            Tier storage t = eventTiers[eventId][tId];
-            require(t.sold + quantities[i] <= t.maxSupply, "Tier sold out");
-            totalRequired += t.price * quantities[i];
-        }
-        require(msg.value == totalRequired, "Incorrect payment");
+        // ── SINGLE LOOP: validate + mint in one pass ──
+        // Avoids reading each tier from storage twice (saves ~2,100 gas per tier SLOAD)
+        uint256 cachedTokenId = nextTokenId;
+        uint256 totalCost;
+        uint256 totalMinted;
 
-        for (uint256 j = 0; j < tierIds.length; j++) {
+        for (uint256 j = 0; j < len; ) {
             uint256 tId = tierIds[j];
             uint24 qty = quantities[j];
+            // Solidity array access handles OOB check
             Tier storage t = eventTiers[eventId][tId];
+            uint256 tierSold = t.sold;
+            uint256 tierMax = t.maxSupply;
+            if (tierSold + qty > tierMax) revert TierSoldOut();
+            uint64 tierPrice = uint64(t.price);
 
-            for (uint256 i = 0; i < qty; i++) {
-                uint256 tokenId = nextTokenId;
-                uint80 nonce = uint80(uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, msg.sender, tokenId))));
-                _mint(msg.sender, tokenId);
-                _tokenData[tokenId] = TokenData({
+            // Mint all tickets for this tier
+            for (uint256 i = 0; i < qty; ) {
+                uint80 nonce;
+                assembly {
+                    let fmp := mload(0x40)
+                    mstore(0x00, prevrandao())
+                    mstore(0x20, timestamp())
+                    mstore(0x40, caller())
+                    mstore(0x60, cachedTokenId)
+                    nonce := keccak256(0x00, 0x80)
+                    mstore(0x40, fmp)
+                }
+                _mint(msg.sender, cachedTokenId);
+                _tokenData[cachedTokenId] = TokenData({
                     eventId: uint32(eventId),
                     tier: uint8(tId),
-                    originalPrice: uint64(t.price),
-                    lastPricePaid: uint64(t.price),
+                    originalPrice: tierPrice,
+                    lastPricePaid: tierPrice,
                     refunded: false,
                     nonce: nonce
                 });
-
-                emit TicketMinted(tokenId, eventId, msg.sender, uint8(tId));
-                nextTokenId++;
+                emit TicketMinted(cachedTokenId, eventId, msg.sender, uint8(tId));
+                unchecked { cachedTokenId++; i++; }
             }
-            t.sold += qty;
-            eventTicketsSold[eventId] += qty;
+
+            unchecked {
+                t.sold = tierSold + qty;
+                totalCost += uint256(tierPrice) * qty;
+                totalMinted += qty;
+                j++;
+            }
         }
 
-        eventRefundLiability[eventId] += msg.value;
+        // Validate payment after minting (revert undoes all state changes anyway)
+        if (msg.value != totalCost) revert WrongPayment();
+
+        // Single storage writes for aggregated values
+        nextTokenId = cachedTokenId;
+        unchecked {
+            eventTicketsSold[eventId] += uint24(totalMinted);
+            eventRefundLiability[eventId] += msg.value;
+        }
 
         // Handle referral payment
         uint256 organiserAmount = msg.value;
-        if (referrer != address(0) && referrer != evt.organiser && referrer != msg.sender && eventReferrals[eventId][referrer] > 0) {
-            uint256 referralBps = eventReferrals[eventId][referrer];
-            uint256 referrerAmount = (msg.value * referralBps) / 10000;
-            organiserAmount = msg.value - referrerAmount;
-
-            (bool successRef, ) = payable(referrer).call{value: referrerAmount}("");
-            require(successRef, "Referral transfer failed");
-            emit ReferralPaid(eventId, referrer, referrerAmount);
+        if (referrer != address(0) && referrer != org && referrer != msg.sender) {
+            uint256 refBps = eventReferrals[eventId][referrer];
+            if (refBps > 0) {
+                uint256 referrerAmount;
+                unchecked { referrerAmount = (msg.value * refBps) / 10000; }
+                organiserAmount = msg.value - referrerAmount;
+                _sendETH(referrer, referrerAmount);
+                emit ReferralPaid(eventId, referrer, referrerAmount);
+            }
         }
 
-        (bool success, ) = payable(evt.organiser).call{value: organiserAmount}("");
-        require(success, "Transfer failed");
+        _sendETH(org, organiserAmount);
     }
 
-    function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps, uint8 maxResaleMarkupPct) {
+    function fetchEventData(uint256 eventId) external view returns (address organiser, uint8 royaltyBps, uint8 maxResaleMarkupPct) {
         Event storage evt = events[eventId];
         return (evt.organiser, evt.royaltyBps, evt.maxResaleMarkupPct);
     }
@@ -298,39 +378,40 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     // ── Referral Management ──────────────────────────────────────────────
     function addReferral(uint256 eventId, address referrer, uint256 bps) external {
         Event storage evt = events[eventId];
-        require(evt.organiser != address(0), "Event non-existent");
-        require(msg.sender == evt.organiser, "Only organiser can add referral");
-        require(referrer != address(0), "Invalid referrer address");
-        require(referrer != evt.organiser, "Cannot refer self");
-        require(bps <= 5000, "Referral cannot exceed 50%");
+        address org = evt.organiser;
+        if (org == address(0)) revert EventNotFound();
+        if (msg.sender != org) revert NotEventOrganiser();
+        if (referrer == address(0)) revert InvalidAddress();
+        if (referrer == org) revert CannotReferSelf();
+        if (bps > 5000) revert ReferralTooHigh();
         
         eventReferrals[eventId][referrer] = bps;
         emit ReferralAdded(eventId, referrer, bps);
     }
 
     function removeReferral(uint256 eventId, address referrer) external {
-        Event storage evt = events[eventId];
-        require(msg.sender == evt.organiser, "Only organiser");
+        if (msg.sender != events[eventId].organiser) revert NotEventOrganiser();
         eventReferrals[eventId][referrer] = 0;
     }
 
-    function getReferralBps(uint256 eventId, address referrer) public view returns (uint256) {
+    function getReferralBps(uint256 eventId, address referrer) external view returns (uint256) {
         return eventReferrals[eventId][referrer];
     }
 
     function listForResale(uint256 tokenId, uint256 priceWei) external {
-        if (isCancelled[_tokenData[tokenId].eventId]) revert EventIsCancelled();
-        require(ownerOf(tokenId) == msg.sender, "Not owner");
-        require(priceWei > 0, "Price must be > 0");
+        TokenData storage td = _tokenData[tokenId];
+        uint256 eventId = uint256(td.eventId);
+        if (isCancelled[eventId]) revert EventIsCancelled();
+        if (ownerOf(tokenId) != msg.sender) revert NotOwner();
+        if (priceWei == 0) revert ZeroPrice();
 
         // Cap is always based on the original mint price, not last resale price.
-        // Uses the organizer-configured maxResaleMarkupPct (defaults to 10% if 0).
-        uint256 origPrice = uint256(_tokenData[tokenId].originalPrice);
-        uint256 eventId = uint256(_tokenData[tokenId].eventId);
+        uint256 origPrice = uint256(td.originalPrice);
         uint256 markupPct = uint256(events[eventId].maxResaleMarkupPct);
         if (markupPct == 0) markupPct = 10; // Default 10% cap
-        uint256 maxResalePrice = origPrice + (origPrice * markupPct / 100);
-        require(priceWei <= maxResalePrice, "Resale price exceeds allowed cap");
+        uint256 maxResalePrice;
+        unchecked { maxResalePrice = origPrice + (origPrice * markupPct / 100); }
+        if (priceWei > maxResalePrice) revert ResaleCapExceeded();
 
         resaleListings[tokenId] = ResaleListing({
             seller: msg.sender,
@@ -343,43 +424,45 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
     function buyResaleTicket(uint256 tokenId) external payable nonReentrant {
         ResaleListing memory listing = resaleListings[tokenId];
-        require(listing.active, "Not for sale");
+        if (!listing.active) revert NotForSale();
         
         uint256 eventId = uint256(_tokenData[tokenId].eventId);
         if (isCancelled[eventId]) revert EventIsCancelled();
         
         Event storage evtResale = events[eventId];
-        require(evtResale.organiser != address(0), "Event non-existent");
-        require(msg.sender != evtResale.organiser, "Organiser buy error");
-        require(msg.value == listing.priceWei, "Incorrect payment");
-        require(ownerOf(tokenId) == listing.seller, "Seller mismatch");
+        address org = evtResale.organiser;
+        if (org == address(0)) revert EventNotFound();
+        if (msg.sender == org) revert OrganiserCannotBuy();
+        if (msg.value != listing.priceWei) revert WrongPayment();
+        if (ownerOf(tokenId) != listing.seller) revert SellerMismatch();
 
-        (address organiser, uint256 royaltyAmount) = royaltyInfo(tokenId, msg.value);
-        uint256 sellerProceeds = msg.value - royaltyAmount;
+        uint256 royaltyAmount = (msg.value * uint256(evtResale.royaltyBps)) / 100;
+        uint256 sellerProceeds;
+        unchecked { sellerProceeds = msg.value - royaltyAmount; }
 
         resaleListings[tokenId].active = false;
 
         if (royaltyAmount > 0) {
-            (bool successRoyalty, ) = payable(organiser).call{value: royaltyAmount}("");
-            require(successRoyalty, "Royalty failed");
+            _sendETH(org, royaltyAmount);
         }
 
-        (bool successSeller, ) = payable(listing.seller).call{value: sellerProceeds}("");
-        require(successSeller, "Seller failed");
+        _sendETH(listing.seller, sellerProceeds);
 
         _transfer(listing.seller, msg.sender, tokenId);
         
         uint256 oldPrice = uint256(_tokenData[tokenId].lastPricePaid);
         _tokenData[tokenId].lastPricePaid = uint64(msg.value);
         
-        eventRefundLiability[eventId] = eventRefundLiability[eventId] - oldPrice + msg.value;
+        unchecked {
+            eventRefundLiability[eventId] = eventRefundLiability[eventId] - oldPrice + msg.value;
+        }
         emit TicketResold(tokenId, listing.seller, msg.sender, msg.value, uint256(_tokenData[tokenId].originalPrice));
     }
 
     function cancelResaleListing(uint256 tokenId) external {
         ResaleListing storage listing = resaleListings[tokenId];
-        require(listing.active, "No listing");
-        require(listing.seller == msg.sender, "Not seller");
+        if (!listing.active) revert NoListing();
+        if (listing.seller != msg.sender) revert NotSeller();
         listing.active = false;
         emit ListingCancelled(tokenId);
     }
@@ -402,8 +485,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         tData.refunded = true; 
         uint256 refundAmount = uint256(tData.lastPricePaid);
         
-        (bool success, ) = payable(msg.sender).call{value: refundAmount}("");
-        if (!success) revert RefundFailed();
+        _sendETH(msg.sender, refundAmount);
 
         emit RefundClaimed(tokenId, msg.sender, refundAmount);
     }
@@ -423,7 +505,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
      * @param expectedAttendees Array of owner addresses matching the token IDs.
      */
     function validateBatch(uint256[] calldata tokenIds, address[] calldata expectedAttendees) external nonReentrant {
-        require(tokenIds.length == expectedAttendees.length, "Length mismatch");
+        if (tokenIds.length != expectedAttendees.length) revert LengthMismatch();
         for (uint256 i = 0; i < tokenIds.length; ) {
             _validateTicketInternal(tokenIds[i], expectedAttendees[i]);
             unchecked { i++; }
@@ -434,58 +516,53 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
      * @dev Internal validation logic to minimize gas and prevent duplication.
      */
     function _validateTicketInternal(uint256 tokenId, address expectedAttendee) internal {
-        // 1. Basic checks
-        uint256 eventId = uint256(_tokenData[tokenId].eventId);
+        TokenData storage td = _tokenData[tokenId];
+        uint256 eventId = uint256(td.eventId);
         if (eventId == 0) revert InvalidToken();
 
-        // 2. Authorization: Caller must be organiser or approved scanner
         if (msg.sender != events[eventId].organiser && !eventScanners[eventId][msg.sender]) {
             revert NotAuthorizedScanner();
         }
 
-        // 3. Status checks
         if (usedTickets[tokenId]) revert AlreadyUsed();
         if (isCancelled[eventId]) revert EventIsCancelled();
-        if (_tokenData[tokenId].refunded) revert AlreadyRefunded();
-
-        // 4. Ownership check: Ensure the attendee currently owns the ticket
+        if (td.refunded) revert AlreadyRefunded();
         if (ownerOf(tokenId) != expectedAttendee) revert WrongAttendee();
 
-        // 5. Mark as used
         usedTickets[tokenId] = true;
 
         emit TicketValidated(tokenId, expectedAttendee, msg.sender, block.timestamp);
     }
 
-    function getTokenPurchasePrice(uint256 tokenId) public view returns (uint256) {
+    function getTokenPurchasePrice(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].lastPricePaid);
     }
 
-    function getTokenNonce(uint256 tokenId) public view returns (uint256) {
+    function getTokenNonce(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].nonce);
     }
 
-    function tokenToEvent(uint256 tokenId) public view returns (uint256) {
+    function tokenToEvent(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].eventId);
     }
 
-    function tokenToTier(uint256 tokenId) public view returns (uint8) {
+    function tokenToTier(uint256 tokenId) external view returns (uint8) {
         return _tokenData[tokenId].tier;
     }
 
-    function getTokenOriginalPrice(uint256 tokenId) public view returns (uint256) {
+    function getTokenOriginalPrice(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].originalPrice);
     }
 
-    function getTokenLastPricePaid(uint256 tokenId) public view returns (uint256) {
+    function getTokenLastPricePaid(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].lastPricePaid);
     }
 
-    function isTokenRefunded(uint256 tokenId) public view returns (bool) {
+    function isTokenRefunded(uint256 tokenId) external view returns (bool) {
         return _tokenData[tokenId].refunded;
     }
 
-    function getResaleListing(uint256 tokenId) public view returns (ResaleListing memory) {
+    function getResaleListing(uint256 tokenId) external view returns (ResaleListing memory) {
         return resaleListings[tokenId];
     }
 

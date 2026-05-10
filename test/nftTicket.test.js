@@ -45,32 +45,32 @@ describe("NFTTicket — Full Gas Report", function () {
 
     it("reverts: tier mismatch", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1], [10, 20], MARKUP))
-        .to.be.revertedWith("Tier mismatch");
+        .to.be.revertedWithCustomError(contract, "TierMismatch");
     });
 
     it("reverts: zero tiers", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", ROY, [], [], MARKUP))
-        .to.be.revertedWith("At least one tier required");
+        .to.be.revertedWithCustomError(contract, "NoTiers");
     });
 
     it("reverts: > 5 tiers", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1,P1,P1,P1,P1,P1], [1,1,1,1,1,1], MARKUP))
-        .to.be.revertedWith("Max 5 tiers allowed");
+        .to.be.revertedWithCustomError(contract, "TooManyTiers");
     });
 
     it("reverts: royalty > 100", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", 101, [P1], [10], MARKUP))
-        .to.be.revertedWith("Royalty <= 100%");
+        .to.be.revertedWithCustomError(contract, "RoyaltyTooHigh");
     });
 
     it("reverts: markup > 100", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", ROY, [P1], [10], 101))
-        .to.be.revertedWith("Markup <= 100%");
+        .to.be.revertedWithCustomError(contract, "MarkupTooHigh");
     });
 
     it("reverts: royalty >= markup (bound check)", async function () {
       await expect(contract.connect(organiser).createEvent("QmE", 20, [P1], [10], 20))
-        .to.be.revertedWith("Royalty must be less than max resale markup");
+        .to.be.revertedWithCustomError(contract, "RoyaltyExceedsMarkup");
     });
 
     it("allows royalty=0 with any markup", async function () {
@@ -103,7 +103,7 @@ describe("NFTTicket — Full Gas Report", function () {
 
     it("reverts: cannot change tier count", async function () {
       await expect(contract.connect(organiser).editEvent(1, [P1], [100]))
-        .to.be.revertedWith("Cannot change tier count");
+        .to.be.revertedWithCustomError(contract, "TierCountChanged");
     });
   });
 
@@ -155,19 +155,19 @@ describe("NFTTicket — Full Gas Report", function () {
 
     it("reverts: wrong payment", async function () {
       await expect(contract.connect(buyer).buyTicket(1, 1, { value: P1 }))
-        .to.be.revertedWith("Insufficient payment");
+        .to.be.revertedWithCustomError(contract, "WrongPayment");
     });
 
     it("reverts: sold out", async function () {
       await contract.connect(buyer).buyTicket(1, 1, { value: VIP });
       await contract.connect(buyer2).buyTicket(1, 1, { value: VIP });
       await expect(contract.connect(buyer3).buyTicket(1, 1, { value: VIP }))
-        .to.be.revertedWith("Sold out");
+        .to.be.revertedWithCustomError(contract, "TierSoldOut");
     });
 
     it("reverts: organiser cannot buy own event", async function () {
       await expect(contract.connect(organiser).buyTicket(1, 0, { value: P1 }))
-        .to.be.revertedWith("Organiser buy error");
+        .to.be.revertedWithCustomError(contract, "OrganiserCannotBuy");
     });
   });
 
@@ -188,7 +188,7 @@ describe("NFTTicket — Full Gas Report", function () {
 
     it("reverts: incorrect payment", async function () {
       await expect(contract.connect(buyer).buyBatchTickets(1, [0], [2], { value: P1 }))
-        .to.be.revertedWith("Incorrect payment");
+        .to.be.revertedWithCustomError(contract, "WrongPayment");
     });
   });
 
@@ -206,15 +206,14 @@ describe("NFTTicket — Full Gas Report", function () {
     });
 
 
-
     it("addReferral reverts: non-organiser", async function () {
       await expect(contract.connect(buyer).addReferral(1, referrer.address, 500))
-        .to.be.revertedWith("Only organiser can add referral");
+        .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
     });
 
     it("addReferral reverts: > 50%", async function () {
       await expect(contract.connect(organiser).addReferral(1, referrer.address, 5001))
-        .to.be.revertedWith("Referral cannot exceed 50%");
+        .to.be.revertedWithCustomError(contract, "ReferralTooHigh");
     });
 
     it("buyTicketWithReferral: referrer gets 5%", async function () {
@@ -262,7 +261,7 @@ describe("NFTTicket — Full Gas Report", function () {
     it("listForResale reverts: above cap", async function () {
       const overCap = P1 + (P1 * BigInt(MARKUP) / 100n) + 1n;
       await expect(contract.connect(buyer).listForResale(1, overCap))
-        .to.be.revertedWith("Resale price exceeds allowed cap");
+        .to.be.revertedWithCustomError(contract, "ResaleCapExceeded");
     });
 
     it("buyResaleTicket: transfers ownership + pays royalty", async function () {
@@ -299,7 +298,7 @@ describe("NFTTicket — Full Gas Report", function () {
     it("cancelResaleListing reverts: not seller", async function () {
       await contract.connect(buyer).listForResale(1, P1);
       await expect(contract.connect(buyer2).cancelResaleListing(1))
-        .to.be.revertedWith("Not seller");
+        .to.be.revertedWithCustomError(contract, "NotSeller");
     });
   });
 
@@ -353,7 +352,7 @@ describe("NFTTicket — Full Gas Report", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // 9. Scanner system: addScanner / removeScanner
+  // 9. Scanner system: addScanner
   // ═══════════════════════════════════════════════════════════════════
   describe("Scanner Management", function () {
     beforeEach(async function () {
@@ -366,15 +365,14 @@ describe("NFTTicket — Full Gas Report", function () {
     });
 
 
-
     it("addScanner reverts: not organiser", async function () {
       await expect(contract.connect(buyer).addScanner(1, scanner.address))
-        .to.be.revertedWith("Not organiser");
+        .to.be.revertedWithCustomError(contract, "NotEventOrganiser");
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // 10. Ticket Validation: validateTicketEntry / validateBatch
+  // 10. Ticket Validation: validateTicketEntry
   // ═══════════════════════════════════════════════════════════════════
   describe("Ticket Validation", function () {
     beforeEach(async function () {
@@ -411,7 +409,6 @@ describe("NFTTicket — Full Gas Report", function () {
       await expect(contract.connect(buyer2).validateTicketEntry(1, buyer.address))
         .to.be.revertedWithCustomError(contract, "NotAuthorizedScanner");
     });
-
 
   });
 
