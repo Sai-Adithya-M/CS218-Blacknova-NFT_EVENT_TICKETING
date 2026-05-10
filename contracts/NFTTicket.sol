@@ -13,22 +13,24 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     // Security: Limit batch size to 10 to ensure transactions don't fail from being too large
     uint24 public constant MAX_BATCH = 10;
 
-    // ── Tier struct: Each event can have multiple tiers ──────────────────
+    // ── Pricing Tiers ────────────────────────────────────────────────────────
+    // Events can have multiple ticket types (e.g., General Admission, VIP)
     struct Tier {
         uint256 price;
         uint256 maxSupply;
         uint256 sold;
     }
 
-    // ── Event struct: Core event data ────────────────────────────────────
+    // ── Event Details ────────────────────────────────────────────────────────
+    // Stores the creator, their royalty cut, and secondary market anti-scalping rules
     struct Event {
         address organiser;   
         uint8   royaltyBps;
         uint8   maxResaleMarkupPct; // Max resale markup % over original price (e.g. 10 = 10%)
     }
 
-    // ── TokenData: Optimized into 1 storage slot ────────────────────────────
-    // uint32 eid(32) + uint8 tier(8) + uint64 orig(64) + uint64 last(64) + bool ref(8) + uint80 nonce(80) = 256 bits
+    // ── Ticket Properties ────────────────────────────────────────────────────
+    // Tracks the lifecycle of a specific ticket, including its current and past prices
     struct TokenData {
         uint32 eventId;
         uint8  tier;
@@ -55,14 +57,14 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     mapping(uint256 => uint256) public eventRefundLiability;
     mapping(uint256 => uint24) public eventTicketsSold;
 
-    // Decentralized access control for ticket validation
+    // Allows organizers to grant door-staff permission to scan tickets
     mapping(uint256 => mapping(address => bool)) public eventScanners;
 
-    // ── Referral system ──────────────────────────────────────────────────
-    // eventId => (referrer address => percentage in basis points, e.g. 500 = 5%)
+    // ── Affiliate System ─────────────────────────────────────────────────
+    // Tracks the commission percentage an affiliate earns for promoting an event
     mapping(uint256 => mapping(address => uint256)) public eventReferrals;
 
-    // ── Custom errors (saves ~200 gas each vs require strings) ───────────
+    // ── System Errors ────────────────────────────────────────────────────────
     error EventIsCancelled();
     error NotEventOrganiser();
     error NotTicketOwner();
@@ -245,7 +247,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
         uint256 tokenId = nextTokenId;
 
-        // Assembly nonce: avoids abi.encodePacked memory allocation overhead
+        // Generate a unique identifier for the ticket to prevent duplication
         uint80 nonce;
         assembly {
             let fmp := mload(0x40)
@@ -277,7 +279,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         
         emit TicketMinted(tokenId, eventId, buyer, uint8(tierId));
 
-        // Handle referral payment
+        // If a valid affiliate referred this sale, pay them their commission instantly
         if (referrer != address(0) && referrer != org && referrer != buyer) {
             uint256 refBps = eventReferrals[eventId][referrer];
             if (refBps > 0) {
@@ -370,7 +372,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             eventRefundLiability[eventId] += msg.value;
         }
 
-        // Handle referral payment
+        // If a valid affiliate referred this sale, pay them their commission instantly
         uint256 organiserAmount = msg.value;
         if (referrer != address(0) && referrer != org && referrer != msg.sender) {
             uint256 refBps = eventReferrals[eventId][referrer];
@@ -391,7 +393,9 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         return (evt.organiser, evt.royaltyBps, evt.maxResaleMarkupPct);
     }
 
-    // ── Referral Management ──────────────────────────────────────────────
+    // =========================================================================
+    //                           AFFILIATE PROGRAM
+    // =========================================================================
     function addReferral(uint256 eventId, address referrer, uint256 bps) external {
         Event storage evt = events[eventId];
         address org = evt.organiser;
@@ -414,6 +418,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         return eventReferrals[eventId][referrer];
     }
 
+    /// @notice Allows a user to list their ticket for sale on the secondary market.
+    /// @dev Enforces the organizer's maximum markup percentage to prevent scalping.
     function listForResale(uint256 tokenId, uint256 priceWei) external {
         TokenData storage td = _tokenData[tokenId];
         uint256 eventId = uint256(td.eventId);
@@ -438,6 +444,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit TicketListed(tokenId, msg.sender, priceWei);
     }
 
+    /// @notice Purchases a ticket from another user on the secondary market.
+    /// @dev Automatically splits the payment between the seller and the organizer (royalties).
     function buyResaleTicket(uint256 tokenId) external payable nonReentrant {
         ResaleListing memory listing = resaleListings[tokenId];
         if (!listing.active) revert NotForSale();
@@ -483,6 +491,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit ListingCancelled(tokenId);
     }
 
+    /// @notice Cancels an event. Organizers must provide enough ETH to refund all tickets.
     function cancelEvent(uint256 eventId) external payable {
         Event storage evt = events[eventId];
         if (msg.sender != evt.organiser) revert NotEventOrganiser();
@@ -492,6 +501,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit EventCancelled(eventId);
     }
 
+    /// @notice Allows a ticketholder to get their money back if the event is cancelled.
     function claimRefund(uint256 tokenId) external nonReentrant {
         if (ownerOf(tokenId) != msg.sender) revert NotTicketOwner();
         TokenData storage tData = _tokenData[tokenId];
@@ -516,7 +526,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     }
 
     /**
-     * @notice Validates multiple tickets in one transaction for gas optimization.
+     * @notice Validates a group of tickets together at the door.
      * @param tokenIds Array of ticket IDs.
      * @param expectedAttendees Array of owner addresses matching the token IDs.
      */
@@ -529,7 +539,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     }
 
     /**
-     * @dev Internal validation logic to minimize gas and prevent duplication.
+     * @dev Core logic to ensure a ticket is authentic, hasn't been used yet, 
+     *      and belongs to the person presenting it.
      */
     function _validateTicketInternal(uint256 tokenId, address expectedAttendee) internal {
         TokenData storage td = _tokenData[tokenId];
