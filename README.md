@@ -41,22 +41,28 @@ graph TD
 *   **IPFS-Backed Metadata**: All event banners and descriptions are stored on IPFS, ensuring the data remains permanent and tamper-proof.
 *   **Event Lifecycle Control**: Edit tier prices/supplies or **Cancel** an event to trigger automated user refunds.
 *   **Decentralized Validation**: Add authorized "Scanners" to verify tickets at the venue gate.
-*   **Referral System**: Configure referral rewards (bps) for promoters to drive ticket sales.
+*   **Referral & Promoter Engine**: 
+    *   **How it Works**: Organizers can assign specific wallets as "Referrers" with a custom commission rate (basis points).
+    *   **Access Control**: Only the event organizer has the authority to add or remove referrers.
+    *   Commission is automatically deducted from the ticket price and routed to the promoter instantly upon a successful mint.
 
 ### 2. Ticketing & Minting Engine
 *   **Primary Sales**: Direct-to-fan minting avoids middleman markups.
+*   **Organizer Restriction**: To ensure market integrity, **the event creator is strictly prohibited from buying their own tickets** (both primary and resale).
 *   **Batch Purchase Logic**: Optimized smart contract functions allow users to buy multiple tickets across different tiers in a single transaction, saving on gas.
-*   **Dynamic Metadata**: Each ticket's tier, event ID, and unique nonce are encoded on-chain.
 *   **Secure QR Validation**: On-chain verifiable entry system to prevent ticket duplication.
 
 ### 3. Secondary Marketplace (P2P)
 *   **Secure Resale with Price Caps**: Owners can list tickets for resale, with prices capped by the organizer (e.g., max 10% markup) to prevent scalping.
+*   **No Organiser Buying**: Organizers cannot buy tickets on the secondary market to inflate prices.
 *   **Escrow-less Trading**: Atomic transfer of ownership and funds, preventing fraud.
 *   **EIP-2981 Standard**: Automated royalty distribution ensures organizers receive a percentage of every resale.
 
 ---
 
 ##  Screenshots
+> [!IMPORTANT]
+> Save your screenshots as `marketplace.png` and `mytickets.png` in the **root directory** of this project for them to appear here.
 
 ### 🛒 Marketplace
 ![Marketplace](./marketplace.png)
@@ -86,70 +92,125 @@ graph TD
 - **Network**: **Ethereum Sepolia Testnet**.
 - **Funds**: Sepolia ETH (Available at [Alchemy Faucet](https://sepoliafaucet.com/)).
 
-### Installation Steps
+### 🚀 Smart Contract Deployment
 
-1.  **Clone & Install Root Dependencies**
+To deploy a new instance of the **NFTTicket** contract:
+
+1.  **Configure Root Environment**:
+    Create a `.env` file in the **root directory** (not inside `frontend/`):
+    ```env
+    RPC_URL=https://eth-sepolia.g.alchemy.com/v2/your_key
+    PRIVATE_KEY=your_wallet_private_key
+    ```
+
+2.  **Deploy to Sepolia**:
+    Run the deployment script using Hardhat:
+    ```bash
+    npx hardhat run scripts/deploy.js --network sepolia
+    ```
+
+3.  **Update Frontend**:
+    Once deployed, copy the new contract address from the terminal and update `VITE_CONTRACT_ADDRESS` in `frontend/.env`.
+
+---
+
+### 💻 Frontend & Installation Steps
+
+1.  **Clone & Install Root Dependencies**:
     ```bash
     git clone [your-repo-url]
     cd CS218-Blacknova-NFT_EVENT_TICKETING
     npm install
     ```
 
-2.  **Smart Contract Compilation**
+2.  **Compile Smart Contracts**:
     ```bash
     npx hardhat compile
     ```
 
-3.  **Frontend Setup**
+3.  **Frontend Setup**:
     ```bash
     cd frontend
     npm install
-    npm run dev
     ```
 
-4.  **Environment Setup**
+4.  **Environment Configuration**:
     Create a `.env` in `frontend/` and add:
     ```env
-    VITE_CONTRACT_ADDRESS=0x... # Your deployed NFTTicket address
-    VITE_PINATA_API_KEY=your_key
-    VITE_PINATA_SECRET_KEY=your_secret
+    VITE_CONTRACT_ADDRESS=0x74eFFE12e70e99e4CC9D2703433eFcF87A35BdE3
+    VITE_PINATA_JWT=your_pinata_jwt_here
+    ```
+
+5.  **Run Locally**:
+    ```bash
+    npm run dev
     ```
 
 ---
 
 ## Smart Contract Specification (`NFTTicket.sol`)
 
-| Function | Description |
-| :--- | :--- |
-| `createEvent(...)` | Initializes event metadata, tiers, and royalty rates. |
-| `editEvent(...)` | Updates pricing and supply for existing tiers. |
-| `cancelEvent(...)` | Cancels event and locks funds for ticket holder refunds. |
-| `buyTicket(...)` | Mints a specific tier ticket for a user. |
-| `buyBatchTickets(...)` | Optimized multi-tier, multi-quantity purchase. |
-| `listForResale(...)` | Creates an active listing with price cap validation. |
-| `buyResaleTicket(...)` | Atomic transfer of NFT with royalty distribution. |
-| `claimRefund(...)` | Allows users to claim funds if an event is cancelled. |
-| `validateTicketEntry(...)` | Marks a ticket as used on-chain (Venue Entry). |
-| `addScanner(...)` | Authorizes a wallet to validate tickets. |
-| `addReferral(...)` | Configures referral rewards for specific addresses. |
+The NETIX smart contract implements the following core functions with full NatSpec documentation for developers.
+
+### 🛠️ Event Management
+- **`createEvent(string ipfsHash, uint8 royaltyBps, uint256[] prices, uint256[] supplies, uint8 maxResaleMarkupPct)`**
+    - `@notice`: Initializes a new event with multiple tiers, royalty rates, and resale caps.
+    - `@param ipfsHash`: The IPFS CID containing event metadata (banners, description).
+    - `@param prices`: Array of ticket prices in Wei for each tier.
+- **`editEvent(uint256 eventId, uint256[] newPrices, uint256[] newSupplies)`**
+    - `@notice`: Updates the prices and supplies for an existing event's tiers.
+    - `@param newSupplies`: Updated max supply (must be >= current sold).
+- **`cancelEvent(uint256 eventId)`**
+    - `@notice`: Cancels an event and locks funds for ticket holder refunds.
+    - `@param eventId`: Unique ID of the event to cancel.
+
+### 🎟️ Ticketing & Referral
+- **`buyTicket(uint256 eventId, uint256 tierId)`**
+    - `@notice`: Purchases and mints a single ticket for a specific tier.
+- **`buyBatchTickets(uint256 eventId, uint256[] tierIds, uint24[] quantities)`**
+    - `@notice`: Optimized multi-tier, multi-quantity purchase in one transaction.
+- **`addReferral(uint256 eventId, address referrer, uint256 bps)`**
+    - `@notice`: Configures a referral reward for a specific promoter wallet.
+    - `@param bps`: The commission rate in basis points (e.g. 500 = 5%).
+
+### 🛍️ Secondary Marketplace
+- **`listForResale(uint256 tokenId, uint256 priceWei)`**
+    - `@notice`: Lists an owned ticket for resale with price cap validation.
+    - `@param priceWei`: Resale price (cannot exceed original price + markup cap).
+- **`buyResaleTicket(uint256 tokenId)`**
+    - `@notice`: Atomic transfer of NFT with royalty distribution.
+- **`claimRefund(uint256 tokenId)`**
+    - `@notice`: Allows users to claim a full refund if an event is cancelled.
+
+### 🛡️ Access Control & Validation
+- **`addScanner(uint256 eventId, address scanner)`**
+    - `@notice`: Authorizes a wallet address to act as a ticket scanner.
+- **`validateTicketEntry(uint256 tokenId, address expectedAttendee)`**
+    - `@notice`: Marks a ticket as 'Used' on-chain at the venue gate.
+    - `@param expectedAttendee`: The wallet address of the person presenting the ticket.
 
 ---
 
 ##  Future Enhancements
 
--  **Ticket verification via QR code**: A secure scanner for event entry to verify NFT ownership instantly.
+-  **Proof of Attendance (POAP)**: Automatically mint commemorative NFT badges for attendees who successfully validate their tickets at the gate.
+-  **Social Tiering**: Unlock exclusive "VIP-only" community chats or early-bird access based on previous event attendance history.
+-  **Dynamic Pricing Oracle**: Implement bonding curves or demand-based pricing for primary ticket sales.
+-  **Fiat onramps for ticket purchase**: Allow users to buy NFT tickets using credit cards and local currency via Stripe/MoonPay.
 -  **WalletConnect & Coinbase Wallet support**: Expanding accessibility beyond MetaMask.
--  **Native mobile app**: A dedicated experience for managing and browsing tickets on the go.
--  **Fiat onramps for ticket purchase**: Allow users to buy NFT tickets using credit cards.
--  **Real-time analytics dashboard**: Advanced tracking for organizers to monitor sales.
 
 ---
 
 ##  Troubleshooting
 
-- **Transaction Reverted**: Ensure you have enough Sepolia ETH for gas. Check if the event ticket supply has reached its limit.
+- **Transaction Reverted**: 
+    - Ensure you have enough Sepolia ETH for gas. 
+    - If buying, check if the tier is sold out.
+    - If you are the event organizer, remember that **you cannot buy your own tickets**.
+- **Referral Not Working**: Only the organizer can authorize a referrer. Ensure the promoter's address was added via `addReferral` with a valid bps (max 50%).
+- **Scanner Access Denied**: Ensure your wallet address has been added to the authorized scanners list for that specific event.
 - **Wallet Not Connecting**: Ensure your MetaMask is set to the **Sepolia Test Network**.
-- **Images Not Loading**: IPFS gateways can sometimes be slow; ensure your Pinata keys are correctly configured.
+- **Images Not Loading**: IPFS gateways can sometimes be slow; ensure your Pinata keys are correctly configured and the hash is valid.
 
 ---
 
