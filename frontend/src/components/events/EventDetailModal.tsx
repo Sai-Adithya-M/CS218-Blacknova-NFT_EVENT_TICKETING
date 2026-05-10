@@ -250,11 +250,16 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                     <span className="flex items-center gap-2"><Calendar size={14} className="text-[var(--accent-purple)]" /> {date.toLocaleDateString()}</span>
                     <span className="flex items-center gap-2">
                       <MapPin size={14} className="text-[var(--accent-teal)]" /> 
-                      {event.locationLink ? (
-                        <a href={event.locationLink} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--accent-teal)] transition-colors underline decoration-dotted underline-offset-4">
-                          {event.venueName ? `${event.venueName}, ${event.location}` : event.location}
-                        </a>
-                      ) : (
+                      {event.locationLink ? (() => {
+                        // Normalize URL to ensure it has a protocol
+                        const rawUrl = event.locationLink.trim();
+                        const href = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl.replace(/^\/\//, '')}`;
+                        return (
+                          <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="hover:text-[var(--accent-teal)] transition-colors underline decoration-dotted underline-offset-4">
+                            {event.venueName ? `${event.venueName}, ${event.location}` : event.location}
+                          </a>
+                        );
+                      })() : (
                         event.venueName ? `${event.venueName}, ${event.location}` : event.location
                       )}
                     </span>

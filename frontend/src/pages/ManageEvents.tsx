@@ -21,6 +21,19 @@ const ABI = [
   "event ReferralAdded(uint256 indexed eventId, address indexed referrer, uint256 bps)"
 ];
 
+/** Ensure a URL has a protocol so <a href=...> opens externally, not as a relative route */
+function normalizeUrl(url: string): string {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  // Already has a protocol
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Protocol-relative URL
+  if (trimmed.startsWith('//')) return `https:${trimmed}`;
+  // Bare domain / path — prepend https://
+  return `https://${trimmed}`;
+}
+
 interface TierFormData {
   name: string;
   price: string;
@@ -175,7 +188,7 @@ export const ManageEvents: React.FC = () => {
         name: formData.title || 'Event',
         location: formData.location || '',
         venueName: formData.venueName || '',
-        locationLink: formData.locationLink || '',
+        locationLink: normalizeUrl(formData.locationLink || ''),
         minAge: formData.minAge || 'All ages',
         date: formData.date || new Date().toISOString(),
         description: formData.description || '',
@@ -559,7 +572,7 @@ export const ManageEvents: React.FC = () => {
                         <ExternalLink size={16} />
                       </div>
                       <input
-                        placeholder="Location Link"
+                        placeholder="https://maps.google.com/..."
                         className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-[var(--accent-teal)] transition-all font-medium text-white placeholder:text-white/30 text-sm shadow-inner"
                         value={formData.locationLink}
                         onChange={e => setFormData({ ...formData, locationLink: e.target.value })}

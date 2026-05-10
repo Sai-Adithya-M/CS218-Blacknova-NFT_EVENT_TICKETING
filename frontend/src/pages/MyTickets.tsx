@@ -452,16 +452,20 @@ export const MyTickets: React.FC = () => {
                           <Clock size={11} />
                           Purchased {purchaseDate.toLocaleDateString()}
                         </span>
-                        {event?.locationLink && (
-                          <a 
-                            href={event.locationLink} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 text-[var(--accent-teal)] hover:text-white transition-colors bg-[var(--accent-teal)]/5 px-2 py-0.5 rounded-md border border-[var(--accent-teal)]/10"
-                          >
-                            <ExternalLink size={10} /> Directions
-                          </a>
-                        )}
+                        {event?.locationLink && (() => {
+                          const rawUrl = event.locationLink.trim();
+                          const href = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl.replace(/^\/\//, '')}`;
+                          return (
+                            <a 
+                              href={href} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 text-[var(--accent-teal)] hover:text-white transition-colors bg-[var(--accent-teal)]/5 px-2 py-0.5 rounded-md border border-[var(--accent-teal)]/10"
+                            >
+                              <ExternalLink size={10} /> Directions
+                            </a>
+                          );
+                        })()}
                         {event?.minAge && (
                           <span className="flex items-center gap-1.5 text-orange-400/80">
                             <Users size={11} />
