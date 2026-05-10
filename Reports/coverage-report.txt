@@ -1,0 +1,131 @@
+C:\Users\vishn\myprojects\Block-Chain\nft-ticketing>npx hardhat coverage
+◇ injecting env (2) from .env // tip: ⌘ suppress logs { quiet: true }
+
+Version
+=======
+> solidity-coverage: v0.8.17
+
+Instrumenting for coverage...
+=============================
+
+> NFTTicket.sol
+
+Compilation:
+============
+
+Nothing to compile
+
+Network Info
+============
+> HardhatEVM: v2.28.6
+> network:    hardhat
+
+
+
+  NFTTicket — Full Gas Report
+    createEvent
+      √ creates event with 1 tier
+      √ creates event with 3 tiers
+      √ creates event with 5 tiers (max)
+      √ reverts: empty IPFS hash
+      √ reverts: tier mismatch
+      √ reverts: zero tiers
+      √ reverts: > 5 tiers
+      √ reverts: royalty > 100
+      √ reverts: markup > 100
+      √ reverts: royalty >= markup (bound check)
+      √ allows royalty=0 with any markup
+    editEvent
+      √ edits prices and supplies
+      √ reverts: event not found
+      √ reverts: tier mismatch
+      √ reverts: tier count changed
+      √ reverts: supply below sold
+      √ reverts: non-organiser
+      √ reverts: cannot change tier count
+    View functions
+      √ getTiers returns all tiers
+      √ getTier returns specific tier
+      √ getTier reverts: invalid tier
+      √ fetchEventData returns organiser + royalty + markup
+    buyTicket
+      √ buys tier 0
+      √ buys tier 1 (VIP)
+      √ reverts: wrong payment
+      √ reverts: sold out
+      √ reverts: organiser cannot buy own event
+      √ reverts: event is cancelled
+      √ reverts: event not found
+    buyBatchTickets
+      √ batch buy: 2 tier-0 + 1 tier-1 (40ms)
+      √ reverts: incorrect payment
+    Referral System
+      √ addReferral: sets referral bps
+      √ addReferral reverts: non-organiser
+      √ addReferral reverts: > 50%
+      √ buyTicketWithReferral: referrer gets 5%
+      √ buyBatchTicketsWithReferral: referrer gets share
+      √ unregistered referrer: organiser gets 100%
+    Secondary Market (Resale)
+      √ listForResale: lists at markup cap
+      √ listForResale reverts: above cap
+      √ buyResaleTicket: transfers ownership + pays royalty
+      √ non-compounding: 2nd resale still capped at original+markup%
+      √ cancelResaleListing: deactivates listing
+      √ cancelResaleListing reverts: not seller
+    Event Cancellation & Refunds
+      √ cancelEvent: emits event
+      √ cancelEvent reverts: insufficient funds
+      √ cancelEvent reverts: not organiser
+      √ claimRefund: refunds buyer after cancellation
+      √ claimRefund reverts: not cancelled
+      √ claimRefund reverts: double refund
+    Scanner Management
+      √ addScanner: grants scanner role
+      √ addScanner reverts: not organiser
+      √ addScanner reverts: invalid address
+      √ removeScanner: revokes scanner role
+      √ removeScanner reverts: not organiser
+    Ticket Validation
+      √ validateTicketEntry: organiser validates
+      √ validateTicketEntry: scanner validates
+      √ validateTicketEntry reverts: already used
+      √ validateTicketEntry reverts: wrong attendee
+      √ validateTicketEntry reverts: not authorized
+    Token Data Views
+      √ tokenToEvent
+      √ tokenToTier
+      √ getTokenOriginalPrice
+      √ getTokenLastPricePaid
+      √ getTokenPurchasePrice
+      √ getTokenNonce: non-zero
+      √ isTokenRefunded: false by default
+      √ getResaleListing: inactive by default
+    EIP-2981 Royalties
+      √ royaltyInfo: returns correct receiver + amount
+      √ supportsInterface: ERC721
+      √ supportsInterface: ERC2981
+
+  Referral Payment Test
+Single: Referrer gained: 0.005 ETH
+Single: Organiser gained: 0.095 ETH
+    √ buyTicketWithReferral: referrer receives 5%
+Batch(3): Referrer gained: 0.015 ETH
+Batch(3): Organiser gained: 0.285 ETH
+    √ buyBatchTicketsWithReferral: referrer receives 5% on batch of 3 tickets
+No-ref batch: Organiser got full 0.2 ETH, referrer got 0
+    √ buyBatchTickets (no referrer): organiser gets 100%
+
+
+  73 passing (3s)
+
+----------------|----------|----------|----------|----------|----------------|
+File            |  % Stmts | % Branch |  % Funcs |  % Lines |Uncovered Lines |
+----------------|----------|----------|----------|----------|----------------|
+ contracts\     |    97.65 |    73.29 |    94.44 |    97.24 |                |
+  NFTTicket.sol |    97.65 |    73.29 |    94.44 |    97.24 |... 535,536,537 |
+----------------|----------|----------|----------|----------|----------------|
+All files       |    97.65 |    73.29 |    94.44 |    97.24 |                |
+----------------|----------|----------|----------|----------|----------------|
+
+> Istanbul reports written to ./coverage/ and ./coverage.json
