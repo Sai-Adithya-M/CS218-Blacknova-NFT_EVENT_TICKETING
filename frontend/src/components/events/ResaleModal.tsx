@@ -18,9 +18,8 @@ export const ResaleModal: React.FC<ResaleModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const royalty = event?.royaltyBps || 0;
-  const marginCap = 10;
-  const totalCapPercent = royalty + marginCap;
-  const maxPrice = ticket ? (ticket.tierPrice * (1 + totalCapPercent / 100)) : 0;
+  const marginCap = event?.maxResaleMarkupPct || 10;
+  const maxPrice = ticket ? (ticket.tierPrice * (1 + marginCap / 100)) : 0;
 
   useEffect(() => {
     if (isOpen) {
@@ -152,8 +151,8 @@ export const ResaleModal: React.FC<ResaleModalProps> = ({
                    <div className="flex items-start gap-3 mb-2">
                       <Info size={14} className="text-[var(--accent-purple)] mt-0.5" />
                       <p className="text-[9px] font-bold text-white/40 leading-relaxed uppercase tracking-wider">
-                        To maintain a fair market, the maximum resale price is capped at {totalCapPercent}% above original cost 
-                        ({royalty}% royalty + {marginCap}% margin).
+                        Max resale price is capped at {marginCap}% above the original cost. 
+                        A {royalty}% royalty is deducted from the sale and sent to the organiser.
                       </p>
                    </div>
                    

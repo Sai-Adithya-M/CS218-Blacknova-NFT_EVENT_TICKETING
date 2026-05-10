@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Calendar, MapPin, Tag, Wallet, 
   Loader2, CheckCircle, Plus, Minus, ShoppingBag, Users
 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import type { Event } from '../../store/useEventStore';
 import { useEventStore } from '../../store/useEventStore';
 import { useTicketStore } from '../../store/useTicketStore';
@@ -19,8 +20,10 @@ const CONTRACT_ABI = [
   "function buyBatchTickets(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities) public payable",
   "function buyBatchTicketsWithReferral(uint256 eventId, uint256[] memory tierIds, uint24[] memory quantities, address referrer) public payable",
   "function buyResaleTicket(uint256 tokenId) public payable",
+  "function getReferralBps(uint256 eventId, address referrer) public view returns (uint256)",
   "event TicketMinted(uint256 indexed tokenId, uint256 indexed eventId, address indexed buyer, uint8 tier)",
-  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice)"
+  "event TicketResold(uint256 indexed tokenId, address indexed oldOwner, address indexed newOwner, uint256 priceWei, uint256 originalPrice)",
+  "event ReferralPaid(uint256 indexed eventId, address indexed referrer, uint256 amount)"
 ];
 
 
@@ -42,6 +45,12 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
   const [purchasedTokenId, setPurchasedTokenId] = useState('');
   const [purchasedTxHash, setPurchasedTxHash] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [searchParams] = useSearchParams();
+
+  // Capture referrer from URL when modal opens — memoize so it doesn't change mid-purchase
+  const referrerFromUrl = useMemo(() => {
+    return searchParams.get('ref') || null;
+  }, [searchParams]);
 
   const { buyTicket, buyResaleTicket: storeBuyResale, tickets } = useTicketStore();
   const { incrementTierSold } = useEventStore();
@@ -126,26 +135,67 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
         }, 0n);
       }
 
-      // Check for referral in URL
-      const urlParams = new URLSearchParams(window.location.search);
-      const referrerAddress = urlParams.get('ref');
-      const isValidReferrer = referrerAddress && /^0x[a-fA-F0-9]{40}$/.test(referrerAddress)
+      // Check for referral — use the memoized value captured when modal opened
+      const referrerAddress = referrerFromUrl;
+      let isValidReferrer = !!(referrerAddress && /^0x[a-fA-F0-9]{40}$/.test(referrerAddress)
         && referrerAddress.toLowerCase() !== user.id?.toLowerCase()
-        && referrerAddress.toLowerCase() !== event.organizerId?.toLowerCase();
+        && referrerAddress.toLowerCase() !== event.organizerId?.toLowerCase());
+
+      console.log('[Referral] ref param:', referrerAddress, '| format valid:', isValidReferrer, '| eventId:', numericEventId);
+
+      // Verify the referral is actually registered on the contract
+      if (isValidReferrer && referrerAddress) {
+        try {
+          const bpsOnChain = await contract.getReferralBps(numericEventId, referrerAddress);
+          const bpsNum = Number(bpsOnChain);
+          console.log('[Referral] On-chain BPS for', referrerAddress, '=', bpsNum);
+          if (bpsNum === 0) {
+            console.warn('[Referral] Referrer NOT registered on-chain for event', numericEventId, '— falling back to normal purchase');
+            toast.error('Referral not registered for this event. Purchasing without referral.');
+            isValidReferrer = false;
+          } else {
+            console.log('[Referral] ✅ Referrer verified on-chain:', bpsNum, 'bps =', (bpsNum / 100).toFixed(2) + '%');
+          }
+        } catch (err) {
+          console.warn('[Referral] Could not verify referral on-chain:', err);
+          // Contract might not support getReferralBps — skip referral to be safe
+          isValidReferrer = false;
+        }
+      }
 
       // Use referral-aware contract calls when a valid referrer is present
       let tx;
-      if (isValidReferrer && tierIndices.length === 1 && tierQtys[0] === 1) {
+      if (isValidReferrer && referrerAddress && tierIndices.length === 1 && tierQtys[0] === 1) {
         // Single ticket + referrer: use the dedicated single-ticket referral function
+        console.log('[Referral] Calling buyTicketWithReferral:', numericEventId, tierIndices[0], referrerAddress);
         tx = await contract.buyTicketWithReferral(numericEventId, tierIndices[0], referrerAddress, { value: totalValue });
-      } else if (isValidReferrer) {
+      } else if (isValidReferrer && referrerAddress) {
         // Multiple tickets + referrer: use batch with referral
+        console.log('[Referral] Calling buyBatchTicketsWithReferral:', numericEventId, tierIndices, tierQtys, referrerAddress);
         tx = await contract.buyBatchTicketsWithReferral(numericEventId, tierIndices, tierQtys, referrerAddress, { value: totalValue });
       } else {
         // No referrer: standard batch purchase
+        console.log('[Referral] No valid referrer — calling buyBatchTickets');
         tx = await contract.buyBatchTickets(numericEventId, tierIndices, tierQtys, { value: totalValue });
       }
       const receipt = await tx.wait();
+
+      // Check if ReferralPaid event was emitted
+      if (isValidReferrer && receipt && receipt.logs) {
+        const referralPaidLog = receipt.logs.find((log: any) => {
+          try {
+            const parsed = contract.interface.parseLog(log);
+            return parsed && parsed.name === 'ReferralPaid';
+          } catch { return false; }
+        });
+        if (referralPaidLog) {
+          const parsed = contract.interface.parseLog(referralPaidLog);
+          console.log('[Referral] ✅ ReferralPaid event:', parsed?.args);
+          toast.success(`Referral commission paid to ${referrerAddress!.slice(0, 6)}...${referrerAddress!.slice(-4)}`);
+        } else {
+          console.warn('[Referral] ⚠️ No ReferralPaid event in receipt — referral may not have been paid');
+        }
+      }
 
       const mintedIds: string[] = [];
       if (receipt && receipt.logs) {
@@ -234,12 +284,18 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   <img src={modalImageSrc} alt={event.title} className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
                   <div className="absolute bottom-6 left-6">
-                    <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3 inline-block">Verified Event</span>
-                    {event.royaltyBps > 0 && (
-                      <span className="ml-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-white/50 mb-3 inline-block">
-                        {event.royaltyBps}% Royalty
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {event.royaltyBps > 0 && (
+                        <span className="px-3.5 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-[10px] font-black uppercase tracking-widest text-purple-400 inline-block">
+                          {event.royaltyBps}% Royalty
+                        </span>
+                      )}
+                      {(event.maxResaleMarkupPct ?? 0) > 0 && (
+                        <span className="px-3.5 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-[10px] font-black uppercase tracking-widest text-orange-400 inline-block">
+                          {event.maxResaleMarkupPct}% Max Resale
+                        </span>
+                      )}
+                    </div>
                     <h2 className="text-3xl font-black tracking-tight italic text-white">{event.title}</h2>
 
                   </div>
@@ -333,6 +389,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                       <div className="flex items-center justify-between p-6 rounded-2xl bg-[var(--accent-teal)]/5 border border-[var(--accent-teal)]/20">
                         <div><p className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--accent-teal)] mb-1">Total Cart Value</p><p className="text-2xl font-black text-white italic">{totalPrice.toFixed(3)} ETH</p></div>
                         <div className="text-right"><p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30 mb-1">Items</p><p className="text-lg font-black text-white/60">{totalQuantity} Tickets</p></div>
+                      </div>
+                    )}
+                    {referrerFromUrl && /^0x[a-fA-F0-9]{40}$/.test(referrerFromUrl) && referrerFromUrl.toLowerCase() !== event.organizerId?.toLowerCase() && (
+                      <div className="flex items-center gap-3 p-4 rounded-2xl bg-[var(--accent-purple)]/5 border border-[var(--accent-purple)]/20">
+                        <div className="w-2 h-2 rounded-full bg-[var(--accent-purple)] animate-pulse" />
+                        <p className="text-[9px] font-black uppercase tracking-widest text-[var(--accent-purple)]">
+                          Referral Active — {referrerFromUrl.slice(0, 6)}...{referrerFromUrl.slice(-4)}
+                        </p>
                       </div>
                     )}
                     {!isOrganizer && (

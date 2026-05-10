@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Wallet, AlertCircle, Loader2, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../../store/useAuthStore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ethers } from 'ethers';
 
 interface LoginModalProps {
@@ -29,6 +29,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
   const [connectedAddress, setConnectedAddress] = useState('');
   const { loginWithWallet, login } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
 
   if (!isOpen) return null;
 
@@ -67,9 +68,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
       setStep('success');
 
       // Close and redirect after brief success screen
+      // PRESERVE the current URL if user is on a meaningful page (e.g. referral link)
+      // Only redirect to dashboard if on the home/root page
       setTimeout(() => {
         handleClose();
-        navigate('/dashboard');
+        const isOnRootOrLogin = location.pathname === '/' || location.pathname === '/login';
+        if (isOnRootOrLogin) {
+          navigate('/dashboard');
+        }
+        // Otherwise stay on the current page (preserves /events?event=evt_1&ref=0xABC)
       }, 1500);
 
     } catch (err: unknown) {
@@ -193,7 +200,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                     <p className="text-sm font-mono font-bold text-white/80">{truncate(connectedAddress)}</p>
                   </div>
                 )}
-                <p className="text-white/50 text-sm font-medium">Redirecting to your dashboard…</p>
+                <p className="text-white/50 text-sm font-medium">Setting up your session…</p>
               </div>
             )}
 
