@@ -10,6 +10,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     uint256 public nextTokenId = 1;
 
     // Strict constraint: Max 10 tickets per batch
+    // Security: Limit batch size to 10 to ensure transactions don't fail from being too large
     uint24 public constant MAX_BATCH = 10;
 
     // ── Tier struct: Each event can have multiple tiers ──────────────────
@@ -117,7 +118,12 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
 
     constructor() ERC721("NFTEventTicket", "NETIX") {}
 
-    /// @dev Gas-optimized ETH transfer using assembly (saves ~200 gas vs .call)
+    // =========================================================================
+    //                           INTERNAL HELPERS
+    // =========================================================================
+
+    /// @dev Internal helper to securely send ETH to an address.
+    /// Used for paying organizers, sellers, processing refunds, and referral payouts.
     function _sendETH(address to, uint256 amount) internal {
         assembly {
             let s := call(gas(), to, amount, 0, 0, 0, 0)
@@ -128,6 +134,12 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         }
     }
 
+    // =========================================================================
+    //                           EVENT MANAGEMENT
+    // =========================================================================
+
+    /// @notice Creates a new ticketing event with multiple pricing tiers.
+    /// @dev Organizers configure the event details, ticket supplies, and resale rules here.
     function createEvent(
         string calldata ipfsHash,
         uint8 royaltyBps,
@@ -152,6 +164,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         });
 
         for (uint256 i = 0; i < len; ) {
+            // Initialize each pricing tier with zero tickets sold so far
             eventTiers[eventId].push(Tier(prices[i], supplies[i], 0));
             unchecked { i++; }
         }
@@ -166,6 +179,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         uint256[] calldata newSupplies
     ) external {
         Event storage evt = events[eventId];
+        // Ensure only the original organizer can modify their event
         address org = evt.organiser;
         if (org == address(0)) revert EventNotFound();
         if (msg.sender != org) revert NotEventOrganiser();
@@ -222,11 +236,11 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         if (org == address(0)) revert EventNotFound();
         if (buyer == org) revert OrganiserCannotBuy();
 
-        // Solidity array access reverts on OOB — no need for explicit length check
+        // Fetch the requested ticket tier and verify it's not sold out
         Tier storage t = eventTiers[eventId][tierId];
-        uint256 soldCount = t.sold;
+        uint256 soldCount = t.sold; // Read once
         if (soldCount >= t.maxSupply) revert TierSoldOut();
-        uint256 tierPrice = t.price;
+        uint256 tierPrice = t.price; // Read once
         if (amount != tierPrice) revert WrongPayment();
 
         uint256 tokenId = nextTokenId;
@@ -253,6 +267,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             nonce: nonce
         });
 
+        // Update global and event-specific counters after successful minting
         unchecked {
             t.sold = soldCount + 1;
             eventTicketsSold[eventId]++;
@@ -295,8 +310,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         if (org == address(0)) revert EventNotFound();
         if (msg.sender == org) revert OrganiserCannotBuy();
 
-        // ── SINGLE LOOP: validate + mint in one pass ──
-        // Avoids reading each tier from storage twice (saves ~2,100 gas per tier SLOAD)
+        // ── Batch Processing ──
+        // Process all requested tickets in a single pass to save on transaction costs
         uint256 cachedTokenId = nextTokenId;
         uint256 totalCost;
         uint256 totalMinted;
@@ -336,6 +351,7 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
                 unchecked { cachedTokenId++; i++; }
             }
 
+            // Keep a running total of the cost and number of tickets minted
             unchecked {
                 t.sold = tierSold + qty;
                 totalCost += uint256(tierPrice) * qty;
@@ -344,10 +360,10 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
             }
         }
 
-        // Validate payment after minting (revert undoes all state changes anyway)
+        // Ensure the buyer sent exactly enough ETH to cover all tickets in the batch
         if (msg.value != totalCost) revert WrongPayment();
 
-        // Single storage writes for aggregated values
+        // Update final state variables with the total batch amounts
         nextTokenId = cachedTokenId;
         unchecked {
             eventTicketsSold[eventId] += uint24(totalMinted);
