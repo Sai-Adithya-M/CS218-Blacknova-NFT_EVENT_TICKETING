@@ -70,13 +70,7 @@ export const Scanner: React.FC = () => {
         "function eventScanners(uint256, address) public view returns (bool)"
       ], provider);
 
-      // 1. Check expiration (5 minutes = 300 seconds)
-      const now = Math.floor(Date.now() / 1000);
-      if (now - data.ts > 300) {
-        throw new Error("QR Code has expired (valid for 5 mins)");
-      }
-
-      // 2. Event Match Check: Ensure ticket is for THIS event
+      // 1. Event Match Check: Ensure ticket is for THIS event
       if (data.e !== eventId) {
         throw new Error(`Ticket is for a different event (${data.e}). Access Denied.`);
       }

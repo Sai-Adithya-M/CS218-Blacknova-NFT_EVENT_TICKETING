@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, MapPin, BadgeCheck, Clock } from 'lucide-react';
+import { Calendar, MapPin, Clock } from 'lucide-react';
 import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import type { Event } from '../../store/useEventStore';
 import { config } from '../../config';
@@ -112,7 +112,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
     >
 
       {/* 1. Banner Image Section */}
-      <div className="relative h-44 overflow-hidden shrink-0">
+      <div className="relative h-52 overflow-hidden shrink-0">
         <motion.img 
           src={currentImageSrc} 
           alt={event.title}
@@ -121,79 +121,77 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
           transition={{ duration: 0.7 }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-        
-        {/* Badges — top left */}
-        <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
-          <span className="px-3 py-1 rounded-full bg-black/50 text-[var(--accent-purple)] text-[10px] font-black tracking-widest backdrop-blur-xl border border-[var(--accent-purple)]/30 flex items-center gap-1.5 shadow-xl">
-            <BadgeCheck size={10} />
-            Verified
-          </span>
-          {event.royaltyBps > 0 && (
-            <span className="px-3 py-1 rounded-full bg-black/50 text-white/70 text-[10px] font-black tracking-widest backdrop-blur-xl border border-white/10 shadow-xl">
-              {event.royaltyBps}% Royalty
-            </span>
-          )}
-          {(event.maxResaleMarkupPct ?? 0) > 0 && (
-            <span className="px-3 py-1 rounded-full bg-black/50 text-orange-400/80 text-[10px] font-black tracking-widest backdrop-blur-xl border border-orange-500/20 shadow-xl">
-              {event.maxResaleMarkupPct}% Max Resale
-            </span>
-          )}
-        </div>
 
-        {/* Age badge — top right */}
-        {event.minAge && event.minAge !== 'All ages' && (
-          <div className="absolute top-4 right-4 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[8px] font-black uppercase text-white tracking-widest flex items-center gap-1.5 z-20">
-            <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
-            {event.minAge}
-          </div>
-        )}
-
-        {/* Countdown — bottom right on image */}
+        {/* Countdown — on image */}
         {countdown && (
-          <div className={`absolute bottom-4 right-4 z-20 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full backdrop-blur-xl border shadow-lg ${
+          <div className={`absolute bottom-4 right-4 z-20 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-3.5 py-1.5 rounded-full backdrop-blur-xl border shadow-lg ${
             countdownType === 'live'
               ? 'bg-green-500/20 text-green-400 border-green-500/30'
               : countdownType === 'ended'
               ? 'bg-black/50 text-white/40 border-white/10'
               : 'bg-black/50 text-[var(--accent-teal)] border-[var(--accent-teal)]/30'
           }`}>
-            <Clock size={10} className={countdownType === 'live' ? 'animate-pulse' : ''} />
+            <Clock size={11} className={countdownType === 'live' ? 'animate-pulse' : ''} />
             {countdownType === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
             {countdown}
+          </div>
+        )}
+
+        {/* Age badge — on image */}
+        {event.minAge && event.minAge !== 'All ages' && (
+          <div className="absolute top-4 right-4 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[9px] font-black uppercase text-white tracking-widest flex items-center gap-1.5 z-20">
+            <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+            {event.minAge}
           </div>
         )}
       </div>
 
       {/* 2. Content Section */}
-      <div className="flex-1 p-5 flex flex-col justify-between bg-zinc-900/50">
+      <div className="flex-1 p-6 flex flex-col justify-between bg-zinc-900/50">
         <div className="space-y-3">
-          <h3 className="text-lg font-black leading-tight line-clamp-1 text-white italic tracking-tight group-hover:text-[var(--accent-teal)] transition-colors">
+          <h3 className="text-xl font-black leading-tight line-clamp-1 text-white italic tracking-tight group-hover:text-[var(--accent-teal)] transition-colors">
             {event.title}
           </h3>
 
-          <div className="flex items-center justify-between text-[10px] font-bold text-white/70">
+          {/* Percentage badges — below title */}
+          {(event.royaltyBps > 0 || (event.maxResaleMarkupPct ?? 0) > 0) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {event.royaltyBps > 0 && (
+                <span className="px-3 py-1 rounded-full bg-purple-500/10 text-purple-400 text-[10px] font-black tracking-widest border border-purple-500/20">
+                  {event.royaltyBps}% Royalty
+                </span>
+              )}
+              {(event.maxResaleMarkupPct ?? 0) > 0 && (
+                <span className="px-3 py-1 rounded-full bg-orange-500/10 text-orange-400 text-[10px] font-black tracking-widest border border-orange-500/20">
+                  {event.maxResaleMarkupPct}% Max Resale
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between text-[11px] font-bold text-white/70">
             <div className="flex items-center gap-2">
-              <Calendar size={12} className="text-[var(--accent-teal)]" />
+              <Calendar size={13} className="text-[var(--accent-teal)]" />
               <span className="truncate">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
             </div>
             <div className="flex items-center gap-2">
-              <MapPin size={12} className="text-[var(--accent-teal)]" />
-              <span className="truncate max-w-[120px] text-right">
+              <MapPin size={13} className="text-[var(--accent-teal)]" />
+              <span className="truncate max-w-[130px] text-right">
                 {event.venueName ? `${event.venueName}, ${event.location}` : event.location}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="space-y-4 pt-4 mt-3 border-t border-white/5">
+        <div className="space-y-4 pt-4 mt-4 border-t border-white/5">
           {/* Availability */}
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1 flex-1 pr-4">
-              <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest text-white/30 mb-1">
+              <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-white/30 mb-1">
                 <span>Availability</span>
                 <span>{Math.round(availability)}%</span>
               </div>
-              <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
                   animate={{ width: `${availability}%` }}
@@ -202,15 +200,15 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
               </div>
             </div>
             <div className="text-right">
-              <span className="text-xs font-black text-white italic">{totalSold}/{totalSupply}</span>
+              <span className="text-sm font-black text-white italic">{totalSold}/{totalSupply}</span>
             </div>
           </div>
 
           {/* Price + CTA */}
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
-              <span className="text-[8px] text-[var(--accent-teal)] font-black uppercase tracking-widest opacity-60">Price From</span>
-              <span className="text-xl font-black text-white tracking-tighter">{lowestPrice} ETH</span>
+              <span className="text-[9px] text-[var(--accent-teal)] font-black uppercase tracking-widest opacity-60">Price From</span>
+              <span className="text-2xl font-black text-white tracking-tighter">{lowestPrice} ETH</span>
             </div>
             
             {showEtherscan ? (
@@ -218,7 +216,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
                 href={`https://sepolia.etherscan.io/address/${config.contractAddress}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black uppercase text-white/60 hover:text-[var(--accent-teal)] hover:border-[var(--accent-teal)]/50 transition-all"
+                className="px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase text-white/60 hover:text-[var(--accent-teal)] hover:border-[var(--accent-teal)]/50 transition-all"
                 onClick={(e) => e.stopPropagation()}
               >
                 Etherscan
@@ -227,7 +225,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
               <motion.div 
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="px-6 py-2.5 rounded-xl bg-white text-black text-[10px] font-black uppercase tracking-widest shadow-xl hover:shadow-white/10 transition-all italic"
+                className="px-7 py-3 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest shadow-xl hover:shadow-white/10 transition-all italic"
               >
                 Buy
               </motion.div>

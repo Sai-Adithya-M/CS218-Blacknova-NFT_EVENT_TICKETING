@@ -53,28 +53,18 @@ export const MyTickets: React.FC = () => {
   const [isResaleModalOpen, setIsResaleModalOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<'active' | 'history'>('active');
   const [processingId, setProcessingId] = React.useState<string | null>(null);
-  const [secureQRs, setSecureQRs] = React.useState<Record<string, { data: string; expiresAt: number }>>({});
-  const [, setTick] = React.useState(0);
-  
+  const [secureQRs, setSecureQRs] = React.useState<Record<string, string>>(() => {
+    try {
+      const stored = localStorage.getItem('netix_secure_qrs');
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
+
+  // Persist QR codes to localStorage whenever they change
   React.useEffect(() => {
-    const timer = setInterval(() => {
-      setTick(t => t + 1);
-      // Clean up expired QRs
-      setSecureQRs(prev => {
-        const next = { ...prev };
-        let changed = false;
-        const now = Math.floor(Date.now() / 1000);
-        Object.keys(next).forEach(id => {
-          if (next[id].expiresAt < now) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
-    }, 30000); // Check every 30s
-    return () => clearInterval(timer);
-  }, []);
+    localStorage.setItem('netix_secure_qrs', JSON.stringify(secureQRs));
+  }, [secureQRs]);
+  
   const [isGeneratingQR, setIsGeneratingQR] = React.useState<string | null>(null);
 
   if (!user) return <AuthFallback />;
@@ -163,13 +153,7 @@ export const MyTickets: React.FC = () => {
         s: signature
       });
 
-      setSecureQRs(prev => ({ 
-        ...prev, 
-        [ticket.id]: {
-          data: qrData,
-          expiresAt: timestamp + 300 // 5 minutes
-        }
-      }));
+      setSecureQRs(prev => ({ ...prev, [ticket.id]: qrData }));
     } catch (err: any) {
       console.error("Detailed QR Error:", err);
       const msg = err.reason || err.message || "Unknown error";
@@ -207,7 +191,7 @@ export const MyTickets: React.FC = () => {
   };
 
   const downloadTicketCard = async (ticket: any, event: any) => {
-    const qrData = secureQRs[ticket.id]?.data;
+    const qrData = secureQRs[ticket.id];
     if (!qrData) {
       toast.error('Generate the secure QR first, then download.');
       return;
@@ -481,7 +465,7 @@ export const MyTickets: React.FC = () => {
                         <div className="relative w-28 h-28 bg-white p-2 rounded-xl shadow-[0_0_20px_rgba(var(--accent-teal),0.3)] overflow-hidden group/qr">
                           {secureQRs[ticket.id] ? (
                             <img
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(secureQRs[ticket.id].data)}`}
+                              src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(secureQRs[ticket.id])}`}
                               alt="Secure Ticket QR"
                               className={`w-full h-full object-contain ${event?.status === 'cancelled' || ticket.isUsed || isPast ? 'opacity-10 grayscale' : ''}`}
                             />
@@ -514,11 +498,7 @@ export const MyTickets: React.FC = () => {
                           )}
                         </div>
 
-                        {secureQRs[ticket.id] && (
-                           <div className="bg-[var(--accent-teal)]/10 text-[7px] font-black uppercase text-[var(--accent-teal)] py-1.5 px-3 rounded-lg border border-[var(--accent-teal)]/20 animate-pulse whitespace-nowrap">
-                              Valid for: {Math.max(0, Math.ceil((secureQRs[ticket.id].expiresAt - Math.floor(Date.now() / 1000)) / 60))}m left
-                           </div>
-                        )}
+
 
                         {secureQRs[ticket.id] && (
                           <button

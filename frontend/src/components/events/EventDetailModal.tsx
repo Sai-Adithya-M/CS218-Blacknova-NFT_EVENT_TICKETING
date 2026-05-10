@@ -284,17 +284,18 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                   <img src={modalImageSrc} alt={event.title} className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent" />
                   <div className="absolute bottom-6 left-6">
-                    <span className="px-3 py-1 rounded-full bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 text-[9px] font-black uppercase tracking-widest text-[var(--accent-teal)] mb-3 inline-block">Verified Event</span>
-                    {event.royaltyBps > 0 && (
-                      <span className="ml-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-white/50 mb-3 inline-block">
-                        {event.royaltyBps}% Royalty
-                      </span>
-                    )}
-                    {(event.maxResaleMarkupPct ?? 0) > 0 && (
-                      <span className="ml-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-[9px] font-black uppercase tracking-widest text-orange-400/70 mb-3 inline-block">
-                        {event.maxResaleMarkupPct}% Max Resale
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {event.royaltyBps > 0 && (
+                        <span className="px-3.5 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-[10px] font-black uppercase tracking-widest text-purple-400 inline-block">
+                          {event.royaltyBps}% Royalty
+                        </span>
+                      )}
+                      {(event.maxResaleMarkupPct ?? 0) > 0 && (
+                        <span className="px-3.5 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-[10px] font-black uppercase tracking-widest text-orange-400 inline-block">
+                          {event.maxResaleMarkupPct}% Max Resale
+                        </span>
+                      )}
+                    </div>
                     <h2 className="text-3xl font-black tracking-tight italic text-white">{event.title}</h2>
 
                   </div>
