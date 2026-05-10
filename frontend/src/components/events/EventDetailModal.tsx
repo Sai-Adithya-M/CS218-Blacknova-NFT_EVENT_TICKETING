@@ -290,6 +290,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({ event, isOpe
                         {event.royaltyBps}% Royalty
                       </span>
                     )}
+                    {(event.maxResaleMarkupPct ?? 0) > 0 && (
+                      <span className="ml-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-[9px] font-black uppercase tracking-widest text-orange-400/70 mb-3 inline-block">
+                        {event.maxResaleMarkupPct}% Max Resale
+                      </span>
+                    )}
                     <h2 className="text-3xl font-black tracking-tight italic text-white">{event.title}</h2>
 
                   </div>

@@ -7,7 +7,7 @@ import { config } from '../../config';
 import { getReadProvider } from '../../utils/blockchain';
 
 const FINANCIALS_ABI = [
-  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps)",
+  "function fetchEventData(uint256 eventId) public view returns (address organiser, uint8 royaltyBps, uint8 maxResaleMarkupPct)",
   "function getTiers(uint256 eventId) public view returns (tuple(uint256 price, uint256 maxSupply, uint256 sold)[])",
   "function getTokenOriginalPrice(uint256 tokenId) public view returns (uint256)",
   "function tokenToTier(uint256 tokenId) public view returns (uint8)",
@@ -22,6 +22,7 @@ interface ChainFinancials {
   maxTickets: number;
   ticketsSold: number;
   royaltyPct: number;
+  maxResaleMarkupPct: number;
   primaryRevenueWei: bigint;
   royaltyRevenueWei: bigint;
   totalRevenueWei: bigint;
@@ -54,7 +55,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
       const contract = new ethers.Contract(config.contractAddress, FINANCIALS_ABI, provider);
 
       // 1. Fetch live on-chain event struct
-      const [, royaltyPct] = await contract.fetchEventData(numericId);
+      const [, royaltyPct, maxResaleMarkupPct] = await contract.fetchEventData(numericId);
       
       // 1b. Fetch Tiers for totals
       const tierData = await contract.getTiers(numericId);
@@ -165,6 +166,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
         maxTickets: totalTickets, 
         ticketsSold, 
         royaltyPct: Number(royaltyPct),
+        maxResaleMarkupPct: Number(maxResaleMarkupPct),
         primaryRevenueWei, 
         royaltyRevenueWei, 
         totalRevenueWei,
@@ -337,6 +339,11 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                 <span className="text-[8px] font-black uppercase tracking-widest text-white/30">Royalty</span>
                 <span className="text-xs font-black text-purple-400">{royaltyPct}%</span>
               </div>
+              <div className="w-px h-4 bg-white/10" />
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/30">Max Resale Markup</span>
+                <span className="text-xs font-black text-orange-400">{financials?.maxResaleMarkupPct ?? event.maxResaleMarkupPct ?? 10}%</span>
+              </div>
             </div>
           )}
 
@@ -409,7 +416,7 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
                   <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-widest mt-2">Continuous Revenue</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs font-black text-purple-400 italic">{royaltyPct} BPS</p>
+                  <p className="text-xs font-black text-purple-400 italic">{royaltyPct}% per resale</p>
                 </div>
               </div>
               <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-zinc-500">
@@ -418,6 +425,22 @@ export const EventFinancialsModal: React.FC<EventFinancialsModalProps> = ({ even
               </div>
               <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-[9px] font-medium text-zinc-500 leading-relaxed uppercase tracking-tighter">
                 You receive this percentage of every ticket resale value automatically on the secondary market.
+              </div>
+            </div>
+
+            <div className="glass-panel bg-orange-500/5 border border-orange-500/20 p-8 rounded-[2.5rem] space-y-4">
+              <div className="flex items-center gap-2 text-white font-black text-[10px] uppercase tracking-widest italic">
+                <TrendingUp className="w-4 h-4 text-orange-400" />
+                Max Resale Markup
+              </div>
+              <div className="flex justify-between items-end">
+                <div>
+                  <p className="text-4xl font-black text-white italic">{financials?.maxResaleMarkupPct ?? event.maxResaleMarkupPct ?? 10}%</p>
+                  <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-widest mt-2">Anti-Scalping Cap</p>
+                </div>
+              </div>
+              <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-[9px] font-medium text-zinc-500 leading-relaxed uppercase tracking-tighter">
+                Resellers can list tickets at a maximum of {financials?.maxResaleMarkupPct ?? event.maxResaleMarkupPct ?? 10}% above the original purchase price.
               </div>
             </div>
 

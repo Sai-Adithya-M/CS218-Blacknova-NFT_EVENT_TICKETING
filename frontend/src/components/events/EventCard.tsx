@@ -133,6 +133,11 @@ export const EventCard: React.FC<EventCardProps> = ({ event, index = 0, showEthe
               {event.royaltyBps}% Royalty
             </span>
           )}
+          {(event.maxResaleMarkupPct ?? 0) > 0 && (
+            <span className="px-3 py-1 rounded-full bg-black/50 text-orange-400/80 text-[10px] font-black tracking-widest backdrop-blur-xl border border-orange-500/20 shadow-xl">
+              {event.maxResaleMarkupPct}% Max Resale
+            </span>
+          )}
         </div>
 
         {/* Age badge — top right */}
