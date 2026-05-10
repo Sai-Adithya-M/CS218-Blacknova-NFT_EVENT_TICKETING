@@ -175,6 +175,10 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         unchecked { nextEventId++; }
     }
 
+    /// @notice Updates the prices and supplies for an existing event's tiers.
+    /// @param eventId The unique identifier of the event to edit.
+    /// @param newPrices Array of new prices in Wei for each tier.
+    /// @param newSupplies Array of new max supplies for each tier (must be >= current sold count).
     function editEvent(
         uint256 eventId,
         uint256[] calldata newPrices,
@@ -200,15 +204,25 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit EventUpdated(eventId, 0, newPrices[0]);
     }
 
+    /// @notice Returns all pricing tiers for a given event.
+    /// @param eventId The unique identifier of the event.
+    /// @return Array of Tier structs containing price, maxSupply, and sold count.
     function getTiers(uint256 eventId) external view returns (Tier[] memory) {
         return eventTiers[eventId];
     }
 
+    /// @notice Returns a specific pricing tier for a given event.
+    /// @param eventId The unique identifier of the event.
+    /// @param tierId The index of the tier to retrieve.
+    /// @return The Tier struct for the requested tier.
     function getTier(uint256 eventId, uint256 tierId) external view returns (Tier memory) {
         if (tierId >= eventTiers[eventId].length) revert InvalidTier();
         return eventTiers[eventId][tierId];
     }
 
+    /// @notice Authorizes a wallet address to act as a ticket scanner at the venue.
+    /// @param eventId The unique identifier of the event.
+    /// @param scanner The wallet address to grant scanning privileges to.
     function addScanner(uint256 eventId, address scanner) external {
         if (msg.sender != events[eventId].organiser) revert NotEventOrganiser();
         if (scanner == address(0)) revert InvalidAddress();
@@ -216,16 +230,26 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit ScannerAdded(eventId, scanner);
     }
 
+    /// @notice Revokes scanning privileges from a wallet address.
+    /// @param eventId The unique identifier of the event.
+    /// @param scanner The wallet address to revoke scanning privileges from.
     function removeScanner(uint256 eventId, address scanner) external {
         if (msg.sender != events[eventId].organiser) revert NotEventOrganiser();
         eventScanners[eventId][scanner] = false;
         emit ScannerRemoved(eventId, scanner);
     }
 
+    /// @notice Purchases and mints a single ticket for a specific tier.
+    /// @param eventId The unique identifier of the event.
+    /// @param tierId The index of the pricing tier to purchase.
     function buyTicket(uint256 eventId, uint256 tierId) external payable nonReentrant {
         _buyTicketInternal(eventId, tierId, msg.sender, msg.value, address(0));
     }
 
+    /// @notice Purchases a ticket with a referral link, routing commission to the promoter.
+    /// @param eventId The unique identifier of the event.
+    /// @param tierId The index of the pricing tier to purchase.
+    /// @param referrer The wallet address of the referrer who promoted the event.
     function buyTicketWithReferral(uint256 eventId, uint256 tierId, address referrer) external payable nonReentrant {
         _buyTicketInternal(eventId, tierId, msg.sender, msg.value, referrer);
     }
@@ -294,10 +318,19 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         _sendETH(org, amount);
     }
 
+    /// @notice Purchases multiple tickets across different tiers in a single transaction.
+    /// @param eventId The unique identifier of the event.
+    /// @param tierIds Array of tier indexes to purchase from.
+    /// @param quantities Array of quantities to purchase for each tier.
     function buyBatchTickets(uint256 eventId, uint256[] calldata tierIds, uint24[] calldata quantities) external payable nonReentrant {
         _buyBatchInternal(eventId, tierIds, quantities, address(0));
     }
 
+    /// @notice Batch purchases multiple tickets with a referral link for commission routing.
+    /// @param eventId The unique identifier of the event.
+    /// @param tierIds Array of tier indexes to purchase from.
+    /// @param quantities Array of quantities to purchase for each tier.
+    /// @param referrer The wallet address of the referrer who promoted the event.
     function buyBatchTicketsWithReferral(uint256 eventId, uint256[] calldata tierIds, uint24[] calldata quantities, address referrer) external payable nonReentrant {
         _buyBatchInternal(eventId, tierIds, quantities, referrer);
     }
@@ -388,6 +421,11 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         _sendETH(org, organiserAmount);
     }
 
+    /// @notice Retrieves the core on-chain data for an event.
+    /// @param eventId The unique identifier of the event.
+    /// @return organiser The wallet address of the event creator.
+    /// @return royaltyBps The royalty percentage the organiser receives on resales.
+    /// @return maxResaleMarkupPct The maximum allowed markup percentage for resale.
     function fetchEventData(uint256 eventId) external view returns (address organiser, uint8 royaltyBps, uint8 maxResaleMarkupPct) {
         Event storage evt = events[eventId];
         return (evt.organiser, evt.royaltyBps, evt.maxResaleMarkupPct);
@@ -396,6 +434,10 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
     // =========================================================================
     //                           AFFILIATE PROGRAM
     // =========================================================================
+    /// @notice Configures a referral reward for a specific promoter wallet.
+    /// @param eventId The unique identifier of the event.
+    /// @param referrer The wallet address of the promoter.
+    /// @param bps The commission rate in basis points (e.g., 500 = 5%).
     function addReferral(uint256 eventId, address referrer, uint256 bps) external {
         Event storage evt = events[eventId];
         address org = evt.organiser;
@@ -409,11 +451,18 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit ReferralAdded(eventId, referrer, bps);
     }
 
+    /// @notice Removes the referral commission for a given promoter.
+    /// @param eventId The unique identifier of the event.
+    /// @param referrer The wallet address of the promoter to remove.
     function removeReferral(uint256 eventId, address referrer) external {
         if (msg.sender != events[eventId].organiser) revert NotEventOrganiser();
         eventReferrals[eventId][referrer] = 0;
     }
 
+    /// @notice Returns the referral commission rate for a given promoter on an event.
+    /// @param eventId The unique identifier of the event.
+    /// @param referrer The wallet address of the promoter.
+    /// @return The commission rate in basis points.
     function getReferralBps(uint256 eventId, address referrer) external view returns (uint256) {
         return eventReferrals[eventId][referrer];
     }
@@ -483,6 +532,8 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit TicketResold(tokenId, listing.seller, msg.sender, msg.value, uint256(_tokenData[tokenId].originalPrice));
     }
 
+    /// @notice Cancels an active resale listing, removing the ticket from the secondary market.
+    /// @param tokenId The unique identifier of the listed ticket.
     function cancelResaleListing(uint256 tokenId) external {
         ResaleListing storage listing = resaleListings[tokenId];
         if (!listing.active) revert NoListing();
@@ -561,38 +612,67 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         emit TicketValidated(tokenId, expectedAttendee, msg.sender, block.timestamp);
     }
 
+    /// @notice Returns the last price paid for a ticket (used for refund calculations).
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The last price paid in Wei.
     function getTokenPurchasePrice(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].lastPricePaid);
     }
 
+    /// @notice Returns the cryptographic nonce assigned to a ticket at mint time.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The unique nonce value used for QR verification.
     function getTokenNonce(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].nonce);
     }
 
+    /// @notice Returns the event ID associated with a given ticket.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The event ID the ticket belongs to.
     function tokenToEvent(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].eventId);
     }
 
+    /// @notice Returns the tier index of a given ticket.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The tier index (0-based).
     function tokenToTier(uint256 tokenId) external view returns (uint8) {
         return _tokenData[tokenId].tier;
     }
 
+    /// @notice Returns the original mint price of a ticket.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The original price in Wei.
     function getTokenOriginalPrice(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].originalPrice);
     }
 
+    /// @notice Returns the most recent price paid for a ticket (updated on resale).
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The last price paid in Wei.
     function getTokenLastPricePaid(uint256 tokenId) external view returns (uint256) {
         return uint256(_tokenData[tokenId].lastPricePaid);
     }
 
+    /// @notice Checks whether a ticket has been refunded.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return True if the ticket has been refunded, false otherwise.
     function isTokenRefunded(uint256 tokenId) external view returns (bool) {
         return _tokenData[tokenId].refunded;
     }
 
+    /// @notice Returns the resale listing details for a given ticket.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @return The ResaleListing struct with seller, price, and active status.
     function getResaleListing(uint256 tokenId) external view returns (ResaleListing memory) {
         return resaleListings[tokenId];
     }
 
+    /// @notice Returns the royalty information for a given token sale, per EIP-2981.
+    /// @param tokenId The unique identifier of the ticket.
+    /// @param salePrice The sale price of the token in Wei.
+    /// @return receiver The wallet address of the royalty recipient (event organiser).
+    /// @return royaltyAmount The royalty amount owed in Wei.
     function royaltyInfo(uint256 tokenId, uint256 salePrice) public view override returns (address receiver, uint256 royaltyAmount) {
         uint256 eventId = uint256(_tokenData[tokenId].eventId);
         Event memory evt = events[eventId];
@@ -600,6 +680,9 @@ contract NFTTicket is ERC721, ReentrancyGuard, IERC2981 {
         return (evt.organiser, amount);
     }
 
+    /// @notice Checks if the contract supports a given interface (ERC-721 and EIP-2981).
+    /// @param interfaceId The interface identifier to check.
+    /// @return True if the interface is supported.
     function supportsInterface(bytes4 interfaceId) public view override(ERC721, IERC165) returns (bool) {
         return interfaceId == type(IERC2981).interfaceId || super.supportsInterface(interfaceId);
     }
