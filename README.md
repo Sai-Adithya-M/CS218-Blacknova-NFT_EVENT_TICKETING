@@ -68,7 +68,7 @@ graph TD
 graph TD
     A[Buyer Connects MetaMask] --> B[Selects Event Tier & Quantity]
     B --> C[Executes Mint Transaction]
-    C --> D[Blockchain Assigns Unique Nonce]
+    C --> D[Blockchain assigns Unique Nonce]
     D --> E[Frontend Captures Event Data]
     E --> F[Generate Secure QR Code]
     F --> G[Save QR to LocalStorage]
